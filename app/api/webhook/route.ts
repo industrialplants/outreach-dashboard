@@ -25,7 +25,11 @@ export async function POST(request: Request) {
   // Register the client on first contact so new boards appear automatically.
   await ensureClient(clientToken, payload.company);
 
-  const lead = await createLead({ ...payload, client_token: clientToken });
+  // Clay sometimes sends names with stray newlines — flatten them to spaces
+  // so the value stays a clean single line.
+  const name = payload.name?.trim().replace(/\n/g, " ");
+
+  const lead = await createLead({ ...payload, client_token: clientToken, name });
 
   return NextResponse.json({ ok: true, id: lead.id }, { status: 201 });
 }
