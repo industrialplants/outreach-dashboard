@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# industrial plants — Outreach Dashboard
 
-## Getting Started
+KI-Outreach-Service für B2B-Kunden. Clay generiert personalisierte Nachrichten und
+schickt sie per Webhook. Kunden sehen ihre Leads, geben Nachrichten frei oder lehnen
+sie ab und verfolgen KPIs.
 
-First, run the development server:
+Gebaut mit **Next.js 16** (App Router, TypeScript) und **better-sqlite3**. Plain CSS,
+kein Tailwind. Akzentfarbe `#FF0E4E`, Hintergrund `#0e0d0d`.
+
+## Starten
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Beim ersten Start wird automatisch eine SQLite-Datenbank unter `data/outreach.db`
+angelegt und mit zwei Demo-Kunden inkl. Beispiel-Leads befüllt.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Zugang
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Der Zugang läuft über einen Token in der URL:
 
-## Learn More
+| Rolle  | URL                      | Sieht                                    |
+| ------ | ------------------------ | ---------------------------------------- |
+| Admin  | `/?token=admin`          | Alle Kunden-Boards + Kunden-Switch o. r. |
+| Kunde  | `/?token=acme-token`     | Nur die eigenen Leads                    |
+| Kunde  | `/?token=nordwind-token` | Nur die eigenen Leads                    |
 
-To learn more about Next.js, take a look at the following resources:
+Der Admin wechselt über das Dropdown oben rechts zwischen den Boards
+(`/?token=admin&client=<KUNDENTOKEN>`). Der Admin-Token lässt sich per
+Umgebungsvariable `ADMIN_TOKEN` überschreiben.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Webhook (Clay)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Clay sendet pro Lead ein `POST` an `/api/webhook`:
 
-## Deploy on Vercel
+```bash
+curl -X POST http://localhost:3000/api/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Max Mustermann",
+    "company": "Muster GmbH",
+    "title": "Head of Ops",
+    "linkedin_url": "https://linkedin.com/in/max",
+    "email": "max@muster.de",
+    "generated_message": "Hallo Max, ...",
+    "research_summary": "Muster GmbH expandiert ...",
+    "signal": "Neue Finanzierungsrunde",
+    "client_token": "acme-token"
+  }'
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `client_token` ist Pflicht. Ist der Token unbekannt, wird der Kunde automatisch
+  angelegt (Board erscheint sofort für den Admin).
+- Jeder neue Lead startet im Status **Neu**.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Leads & Status
+
+Statuslauf: **Neu → Freigegeben → Abgelehnt → Gesendet → Geantwortet → Call gebucht**.
+
+- Status per Dropdown pro Lead änderbar.
+- Schnellaktionen **Freigeben** / **Ablehnen** / **Kommentar**.
+- Nachricht + Research pro Lead aufklappbar.
+
+## KPIs & Report
+
+- **Outreaches diese Woche** – neue Leads seit Montag dieser Woche.
+- **Antwortrate** – Antworten (inkl. Calls) im Verhältnis zu gesendeten Nachrichten.
+- **Gebuchte Calls** – Leads im Status *Call gebucht*.
+- **Wochenreport** – Tab mit Leads/Freigaben/Sendungen/Antworten/Calls je Kalenderwoche.
+
+## Struktur
+
+```
+app/
+  page.tsx                 Server Component: Token -> Board-Auflösung
+  layout.tsx
+  globals.css              Design (plain CSS)
+  components/
+    Dashboard.tsx          Client Component: Tabs, KPIs, Leads, Report
+    AccessGate.tsx         Zugangsseite bei fehlendem/ungültigem Token
+  api/
+    webhook/route.ts       POST von Clay
+    leads/[id]/route.ts    PATCH Status/Kommentar
+lib/
+  db.ts                    better-sqlite3, Schema, Seed
+  store.ts                 Queries, KPIs, Wochenreport
+  types.ts                 Typen, Status-Labels
+```
+
+## API
+
+| Methode | Pfad             | Zweck                                     |
+| ------- | ---------------- | ----------------------------------------- |
+| `POST`  | `/api/webhook`   | Lead von Clay empfangen                   |
+| `GET`   | `/api/webhook`   | Health-Check                              |
+| `PATCH` | `/api/leads/:id` | Status/Kommentar ändern (Token-geschützt) |
