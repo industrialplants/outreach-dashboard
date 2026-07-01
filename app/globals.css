@@ -455,6 +455,135 @@ code {
   font-family: var(--font-geist-mono), monospace;
 }
 
+/* ---------- Clients (admin) ---------- */
+
+.clients-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.clients-list-card,
+.client-form-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.section-title {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.clients-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.clients-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.clients-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.clients-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.clients-table tbody tr:hover {
+  background: var(--panel-2);
+}
+
+.client-cell-name {
+  font-weight: 500;
+}
+.client-cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.field {
+  display: block;
+  margin-bottom: 16px;
+}
+.field > span {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.field input {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 9px 11px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.field-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.field-row input {
+  flex: 1;
+}
+.field-row .btn {
+  white-space: nowrap;
+}
+
+.form-error {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--red);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.created-link {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.created-link-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.link-value {
+  flex: 1;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 8px 10px;
+}
+
 /* ---------- Empty / gate ---------- */
 
 .empty {

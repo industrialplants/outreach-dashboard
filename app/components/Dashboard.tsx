@@ -1,8 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import type { Client, Kpis, Lead, LeadStatus, WeekReportRow } from "@/lib/types";
+import { useCallback, useEffect, useState, useTransition } from "react";
+import type {
+  Client,
+  ClientWithCount,
+  Kpis,
+  Lead,
+  LeadStatus,
+  WeekReportRow,
+} from "@/lib/types";
 import { STATUS_LABELS, STATUS_ORDER } from "@/lib/types";
 
 interface DashboardProps {
@@ -15,7 +22,7 @@ interface DashboardProps {
   report: WeekReportRow[];
 }
 
-type Tab = "leads" | "report";
+type Tab = "leads" | "report" | "clients";
 
 export default function Dashboard({
   role,
@@ -89,40 +96,46 @@ export default function Dashboard({
         </div>
       </header>
 
-      {noBoard ? (
+      <nav className="tabs">
+        <button
+          className={tab === "leads" ? "tab active" : "tab"}
+          onClick={() => setTab("leads")}
+        >
+          Leads
+        </button>
+        <button
+          className={tab === "report" ? "tab active" : "tab"}
+          onClick={() => setTab("report")}
+        >
+          Wochenreport
+        </button>
+        {role === "admin" && (
+          <button
+            className={tab === "clients" ? "tab active" : "tab"}
+            onClick={() => setTab("clients")}
+          >
+            Kunden
+          </button>
+        )}
+      </nav>
+
+      {tab === "clients" && role === "admin" ? (
+        <ClientsPanel adminToken={adminToken!} />
+      ) : noBoard ? (
         <section className="empty big">
           <p>Noch keine Kunden angelegt.</p>
           <p className="muted">
-            Sobald Clay Leads an den Webhook sendet, erscheinen hier die
-            Kunden-Boards.
+            Lege links im Tab „Kunden“ einen Kunden an — oder sobald Clay Leads
+            an den Webhook sendet, erscheinen hier die Kunden-Boards.
           </p>
         </section>
-      ) : (
+      ) : tab === "leads" ? (
         <>
-          <nav className="tabs">
-            <button
-              className={tab === "leads" ? "tab active" : "tab"}
-              onClick={() => setTab("leads")}
-            >
-              Leads
-            </button>
-            <button
-              className={tab === "report" ? "tab active" : "tab"}
-              onClick={() => setTab("report")}
-            >
-              Wochenreport
-            </button>
-          </nav>
-
-          {tab === "leads" ? (
-            <>
-              {kpis && <KpiRow kpis={kpis} />}
-              <LeadList leads={leads} onMutate={mutate} />
-            </>
-          ) : (
-            <ReportTable report={report} />
-          )}
+          {kpis && <KpiRow kpis={kpis} />}
+          <LeadList leads={leads} onMutate={mutate} />
         </>
+      ) : (
+        <ReportTable report={report} />
       )}
     </main>
   );
@@ -350,6 +363,246 @@ function ReportTable({ report }: { report: WeekReportRow[] }) {
           })}
         </tbody>
       </table>
+    </section>
+  );
+}
+
+// Turn a client name into a URL-safe slug for token suggestions.
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "") // strip remaining accents (é→e …)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// A short random suffix so tokens stay unique and not guessable from the name.
+function randomSuffix(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
+
+function generateToken(name: string): string {
+  const base = slugify(name).slice(0, 32);
+  return base ? `${base}-${randomSuffix()}` : `kunde-${randomSuffix()}`;
+}
+
+// Admin-only "Kunden" tab: list, create and delete client boards.
+function ClientsPanel({ adminToken }: { adminToken: string }) {
+  const [clients, setClients] = useState<ClientWithCount[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+
+  const [name, setName] = useState("");
+  const [token, setToken] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // The link shown for copying right after a successful create.
+  const [createdLink, setCreatedLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoadError(false);
+    try {
+      const res = await fetch(
+        `/api/clients?token=${encodeURIComponent(adminToken)}`,
+      );
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as { clients: ClientWithCount[] };
+      setClients(data.clients);
+    } catch {
+      setLoadError(true);
+    }
+  }, [adminToken]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function dashboardLink(clientToken: string): string {
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    return `${origin}/?token=${encodeURIComponent(clientToken)}`;
+  }
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard may be unavailable (e.g. insecure origin); ignore silently.
+    }
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    setCreatedLink(null);
+
+    const cleanName = name.trim();
+    const cleanToken = token.trim();
+    if (!cleanName || !cleanToken) {
+      setFormError("Bitte Kundenname und Token ausfüllen.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: cleanName,
+          token: cleanToken,
+          adminToken,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!res.ok) {
+        setFormError(data.error ?? "Anlegen fehlgeschlagen.");
+        return;
+      }
+      setCreatedLink(dashboardLink(cleanToken));
+      setName("");
+      setToken("");
+      await load();
+    } catch {
+      setFormError("Netzwerkfehler. Bitte erneut versuchen.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function remove(clientToken: string, clientName: string) {
+    if (
+      !window.confirm(
+        `Kunde „${clientName}“ und alle zugehörigen Leads unwiderruflich löschen?`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/clients", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: clientToken, adminToken }),
+      });
+      if (!res.ok) {
+        alert("Löschen fehlgeschlagen. Bitte erneut versuchen.");
+        return;
+      }
+      await load();
+    } catch {
+      alert("Netzwerkfehler. Bitte erneut versuchen.");
+    }
+  }
+
+  return (
+    <section className="clients-panel">
+      <div className="clients-list-card">
+        <h2 className="section-title">Kunden</h2>
+        {loadError ? (
+          <p className="muted">Kunden konnten nicht geladen werden.</p>
+        ) : clients === null ? (
+          <p className="muted">Lädt…</p>
+        ) : clients.length === 0 ? (
+          <p className="muted">Noch keine Kunden angelegt.</p>
+        ) : (
+          <table className="clients-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Token</th>
+                <th>Leads</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {clients.map((c) => (
+                <tr key={c.token}>
+                  <td className="client-cell-name">{c.name}</td>
+                  <td>
+                    <code>{c.token}</code>
+                  </td>
+                  <td>{c.leadCount}</td>
+                  <td className="client-cell-actions">
+                    <button
+                      className="btn reject small"
+                      onClick={() => remove(c.token, c.name)}
+                    >
+                      Löschen
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <form className="client-form-card" onSubmit={submit}>
+        <h2 className="section-title">Neuen Kunden anlegen</h2>
+
+        <label className="field">
+          <span>Kundenname</span>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="z. B. ACME Manufacturing"
+          />
+        </label>
+
+        <label className="field">
+          <span>Token</span>
+          <div className="field-row">
+            <input
+              type="text"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="z. B. acme-a1b2c3"
+            />
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => setToken(generateToken(name))}
+            >
+              Generieren
+            </button>
+          </div>
+        </label>
+
+        {formError && <p className="form-error">{formError}</p>}
+
+        <div className="form-actions">
+          <button className="btn approve" type="submit" disabled={submitting}>
+            {submitting ? "Legt an…" : "Kunde anlegen"}
+          </button>
+        </div>
+
+        {createdLink && (
+          <div className="created-link">
+            <div className="detail-label">Dashboard-Link</div>
+            <div className="created-link-row">
+              <code className="link-value">{createdLink}</code>
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => copy(createdLink)}
+              >
+                {copied ? "Kopiert ✓" : "Kopieren"}
+              </button>
+            </div>
+          </div>
+        )}
+      </form>
     </section>
   );
 }

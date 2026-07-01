@@ -49,6 +49,11 @@ export interface Client {
   name: string;
 }
 
+// A client enriched with its lead count, for the admin "Kunden" tab.
+export interface ClientWithCount extends Client {
+  leadCount: number;
+}
+
 export interface Kpis {
   outreachesThisWeek: number;
   responseRate: number; // 0..1
