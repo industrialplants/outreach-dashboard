@@ -1,6 +1,7 @@
 import { getDb } from "./db";
 import type {
   Client,
+  ClientWithCount,
   Kpis,
   Lead,
   LeadStatus,
@@ -21,6 +22,41 @@ export function getClient(token: string): Client | undefined {
   return getDb()
     .prepare("SELECT token, name FROM clients WHERE token = ?")
     .get(token) as Client | undefined;
+}
+
+// Clients plus their lead count, for the admin "Kunden" tab.
+export function listClientsWithCounts(): ClientWithCount[] {
+  return getDb()
+    .prepare(
+      `SELECT c.token AS token, c.name AS name,
+              COUNT(l.id) AS leadCount
+         FROM clients c
+         LEFT JOIN leads l ON l.client_token = c.token
+        GROUP BY c.token, c.name
+        ORDER BY c.name`,
+    )
+    .all() as ClientWithCount[];
+}
+
+// Create a new client. Returns undefined if the token is already taken.
+export function createClient(token: string, name: string): Client | undefined {
+  if (getClient(token)) return undefined;
+  getDb()
+    .prepare("INSERT INTO clients (token, name) VALUES (?, ?)")
+    .run(token, name);
+  return { token, name };
+}
+
+// Delete a client together with all of its leads. Returns false if unknown.
+export function deleteClient(token: string): boolean {
+  const db = getDb();
+  if (!getClient(token)) return false;
+  const tx = db.transaction((t: string) => {
+    db.prepare("DELETE FROM leads WHERE client_token = ?").run(t);
+    db.prepare("DELETE FROM clients WHERE token = ?").run(t);
+  });
+  tx(token);
+  return true;
 }
 
 // Auto-register a client the first time Clay sends a lead with an unknown token.
