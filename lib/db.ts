@@ -1,32 +1,32 @@
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import path from "node:path";
+import { createClient, type Client, type InStatement } from "@libsql/client";
 
 // The admin board is reached via /?token=admin. Overridable via env for real deployments.
 export const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "admin";
 
-// Persist the SQLite file under <project>/data so it survives dev restarts.
-const DATA_DIR = path.join(process.cwd(), "data");
-const DB_PATH = path.join(DATA_DIR, "outreach.db");
-
-// Reuse a single connection across hot-reloads in dev (Next re-evaluates modules).
+// Reuse a single client + one-time init across hot-reloads in dev and warm
+// serverless invocations (Next re-evaluates modules; globals survive).
 declare global {
   // eslint-disable-next-line no-var
-  var __outreachDb: Database.Database | undefined;
+  var __outreachDb: Client | undefined;
+  // eslint-disable-next-line no-var
+  var __outreachDbReady: Promise<void> | undefined;
 }
 
-function createConnection(): Database.Database {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
-  seed(db);
-  return db;
+function createConnection(): Client {
+  const url = process.env.TURSO_DATABASE_URL;
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+  if (!url) {
+    throw new Error(
+      "TURSO_DATABASE_URL is not set — configure it in .env.local (local) and in the Vercel project env vars (production).",
+    );
+  }
+  return createClient({ url, authToken });
 }
 
-function migrate(db: Database.Database): void {
-  db.exec(`
+async function migrate(db: Client): Promise<void> {
+  // Same schema as the previous better-sqlite3 setup. IF NOT EXISTS keeps this
+  // idempotent, so it is safe to run on every cold start.
+  await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS clients (
       token TEXT PRIMARY KEY,
       name  TEXT NOT NULL
@@ -57,37 +57,20 @@ function migrate(db: Database.Database): void {
 
 // Seed a couple of demo clients + sample leads on first run so the dashboard
 // isn't empty before Clay has sent anything. Idempotent: only runs when empty.
-function seed(db: Database.Database): void {
-  const clientCount = db.prepare("SELECT COUNT(*) AS n FROM clients").get() as {
-    n: number;
-  };
-  if (clientCount.n > 0) return;
-
-  const insertClient = db.prepare(
-    "INSERT INTO clients (token, name) VALUES (?, ?)",
-  );
-  const demoClients: [string, string][] = [
-    ["acme-token", "ACME Manufacturing"],
-    ["nordwind-token", "Nordwind Logistik"],
-  ];
-  for (const [token, name] of demoClients) insertClient.run(token, name);
+async function seed(db: Client): Promise<void> {
+  const res = await db.execute("SELECT COUNT(*) AS n FROM clients");
+  const clientCount = Number(res.rows[0].n);
+  if (clientCount > 0) return;
 
   const now = Date.now();
   const day = 24 * 60 * 60 * 1000;
   const iso = (offsetDays: number) =>
     new Date(now - offsetDays * day).toISOString();
 
-  const insertLead = db.prepare(`
-    INSERT INTO leads (
-      client_token, name, company, title, linkedin_url, email,
-      generated_message, research_summary, signal, status, comment,
-      created_at, updated_at
-    ) VALUES (
-      @client_token, @name, @company, @title, @linkedin_url, @email,
-      @generated_message, @research_summary, @signal, @status, @comment,
-      @created_at, @updated_at
-    )
-  `);
+  const demoClients: [string, string][] = [
+    ["acme-token", "ACME Manufacturing"],
+    ["nordwind-token", "Nordwind Logistik"],
+  ];
 
   const samples = [
     {
@@ -204,17 +187,48 @@ function seed(db: Database.Database): void {
     },
   ];
 
-  const insertMany = db.transaction((rows: typeof samples) => {
-    for (const r of rows) {
-      insertLead.run({ ...r, updated_at: r.created_at });
-    }
-  });
-  insertMany(samples);
+  const stmts: InStatement[] = [];
+  for (const [token, name] of demoClients) {
+    stmts.push({
+      sql: "INSERT INTO clients (token, name) VALUES ($token, $name)",
+      args: { token, name },
+    });
+  }
+  for (const r of samples) {
+    stmts.push({
+      sql: `INSERT INTO leads (
+        client_token, name, company, title, linkedin_url, email,
+        generated_message, research_summary, signal, status, comment,
+        created_at, updated_at
+      ) VALUES (
+        $client_token, $name, $company, $title, $linkedin_url, $email,
+        $generated_message, $research_summary, $signal, $status, $comment,
+        $created_at, $updated_at
+      )`,
+      args: { ...r, updated_at: r.created_at },
+    });
+  }
+
+  // Wrap the seed in a single transaction: all rows land or none do.
+  await db.batch(stmts, "write");
 }
 
-export function getDb(): Database.Database {
+// Return the shared libsql client, running migrate + seed exactly once.
+export async function getDb(): Promise<Client> {
   if (!global.__outreachDb) {
     global.__outreachDb = createConnection();
   }
+  if (!global.__outreachDbReady) {
+    const db = global.__outreachDb;
+    global.__outreachDbReady = (async () => {
+      await migrate(db);
+      await seed(db);
+    })().catch((err) => {
+      // Let a later request retry init instead of caching the failure.
+      global.__outreachDbReady = undefined;
+      throw err;
+    });
+  }
+  await global.__outreachDbReady;
   return global.__outreachDb;
 }

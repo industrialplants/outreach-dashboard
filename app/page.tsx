@@ -28,7 +28,7 @@ export default async function Page(props: PageProps<"/">) {
   const isAdmin = token === ADMIN_TOKEN;
 
   if (isAdmin) {
-    const clients = listClients();
+    const clients = await listClients();
     if (clients.length === 0) {
       return (
         <Dashboard
@@ -43,23 +43,34 @@ export default async function Page(props: PageProps<"/">) {
       );
     }
     const selected = clients.find((c) => c.token === clientParam) ?? clients[0];
+    const [leads, kpis, report] = await Promise.all([
+      listLeads(selected.token),
+      computeKpis(selected.token),
+      weeklyReport(selected.token),
+    ]);
     return (
       <Dashboard
         role="admin"
         adminToken={ADMIN_TOKEN}
         clients={clients}
         selected={selected}
-        leads={listLeads(selected.token)}
-        kpis={computeKpis(selected.token)}
-        report={weeklyReport(selected.token)}
+        leads={leads}
+        kpis={kpis}
+        report={report}
       />
     );
   }
 
-  const client = getClient(token);
+  const client = await getClient(token);
   if (!client) {
     return <AccessGate reason="invalid" />;
   }
+
+  const [leads, kpis, report] = await Promise.all([
+    listLeads(client.token),
+    computeKpis(client.token),
+    weeklyReport(client.token),
+  ]);
 
   return (
     <Dashboard
@@ -67,9 +78,9 @@ export default async function Page(props: PageProps<"/">) {
       adminToken={null}
       clients={[client]}
       selected={client}
-      leads={listLeads(client.token)}
-      kpis={computeKpis(client.token)}
-      report={weeklyReport(client.token)}
+      leads={leads}
+      kpis={kpis}
+      report={report}
     />
   );
 }

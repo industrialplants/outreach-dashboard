@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { getClient } from "@/lib/store";
-import { isValidStatus, updateLead } from "@/lib/store";
-import { getDb, ADMIN_TOKEN } from "@/lib/db";
-import type { Lead } from "@/lib/types";
+import { getClient, getLead, isValidStatus, updateLead } from "@/lib/store";
+import { ADMIN_TOKEN } from "@/lib/db";
 
 interface PatchBody {
   status?: string;
@@ -28,9 +26,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const lead = getDb()
-    .prepare("SELECT * FROM leads WHERE id = ?")
-    .get(leadId) as Lead | undefined;
+  const lead = await getLead(leadId);
   if (!lead) {
     return NextResponse.json({ error: "Lead not found" }, { status: 404 });
   }
@@ -39,7 +35,7 @@ export async function PATCH(
   const token = body.token?.trim();
   const isAdmin = token === ADMIN_TOKEN;
   if (!isAdmin) {
-    if (!token || !getClient(token) || token !== lead.client_token) {
+    if (!token || token !== lead.client_token || !(await getClient(token))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   }
@@ -48,7 +44,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 
-  const updated = updateLead(leadId, {
+  const updated = await updateLead(leadId, {
     status: isValidStatus(body.status) ? body.status : undefined,
     comment: body.comment,
   });

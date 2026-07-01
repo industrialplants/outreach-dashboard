@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   if (!isAdmin(request.nextUrl.searchParams.get("token"))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  return NextResponse.json({ ok: true, clients: listClientsWithCounts() });
+  return NextResponse.json({ ok: true, clients: await listClientsWithCounts() });
 }
 
 interface ClientBody {
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const client = createClient(token, name);
+  const client = await createClient(token, name);
   if (!client) {
     return NextResponse.json(
       { error: "Dieser Token ist bereits vergeben." },
@@ -86,7 +86,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "token is required" }, { status: 400 });
   }
 
-  if (!deleteClient(token)) {
+  if (!(await deleteClient(token))) {
     return NextResponse.json({ error: "Client not found" }, { status: 404 });
   }
 

@@ -1,3 +1,4 @@
+import type { Row } from "@libsql/client";
 import { getDb } from "./db";
 import type {
   Client,
@@ -10,92 +11,148 @@ import type {
 } from "./types";
 import { STATUS_ORDER } from "./types";
 
-// ---------- Clients ----------
+// ---------- Row mapping ----------
+// libsql rows are array-like objects (indexed and named). Map them to plain,
+// typed, JSON-serializable objects before they leave this module.
 
-export function listClients(): Client[] {
-  return getDb()
-    .prepare("SELECT token, name FROM clients ORDER BY name")
-    .all() as Client[];
+function mapClient(r: Row): Client {
+  return { token: String(r.token), name: String(r.name) };
 }
 
-export function getClient(token: string): Client | undefined {
-  return getDb()
-    .prepare("SELECT token, name FROM clients WHERE token = ?")
-    .get(token) as Client | undefined;
+function mapLead(r: Row): Lead {
+  return {
+    id: Number(r.id),
+    client_token: String(r.client_token),
+    name: String(r.name),
+    company: String(r.company),
+    title: String(r.title),
+    linkedin_url: String(r.linkedin_url),
+    email: String(r.email),
+    generated_message: String(r.generated_message),
+    research_summary: String(r.research_summary),
+    signal: String(r.signal),
+    status: String(r.status) as LeadStatus,
+    comment: String(r.comment),
+    created_at: String(r.created_at),
+    updated_at: String(r.updated_at),
+  };
+}
+
+// ---------- Clients ----------
+
+export async function listClients(): Promise<Client[]> {
+  const db = await getDb();
+  const rs = await db.execute("SELECT token, name FROM clients ORDER BY name");
+  return rs.rows.map(mapClient);
+}
+
+export async function getClient(token: string): Promise<Client | undefined> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: "SELECT token, name FROM clients WHERE token = ?",
+    args: [token],
+  });
+  return rs.rows[0] ? mapClient(rs.rows[0]) : undefined;
 }
 
 // Clients plus their lead count, for the admin "Kunden" tab.
-export function listClientsWithCounts(): ClientWithCount[] {
-  return getDb()
-    .prepare(
-      `SELECT c.token AS token, c.name AS name,
-              COUNT(l.id) AS leadCount
-         FROM clients c
-         LEFT JOIN leads l ON l.client_token = c.token
-        GROUP BY c.token, c.name
-        ORDER BY c.name`,
-    )
-    .all() as ClientWithCount[];
+export async function listClientsWithCounts(): Promise<ClientWithCount[]> {
+  const db = await getDb();
+  const rs = await db.execute(
+    `SELECT c.token AS token, c.name AS name,
+            COUNT(l.id) AS leadCount
+       FROM clients c
+       LEFT JOIN leads l ON l.client_token = c.token
+      GROUP BY c.token, c.name
+      ORDER BY c.name`,
+  );
+  return rs.rows.map((r) => ({
+    token: String(r.token),
+    name: String(r.name),
+    leadCount: Number(r.leadCount),
+  }));
 }
 
 // Create a new client. Returns undefined if the token is already taken.
-export function createClient(token: string, name: string): Client | undefined {
-  if (getClient(token)) return undefined;
-  getDb()
-    .prepare("INSERT INTO clients (token, name) VALUES (?, ?)")
-    .run(token, name);
+export async function createClient(
+  token: string,
+  name: string,
+): Promise<Client | undefined> {
+  if (await getClient(token)) return undefined;
+  const db = await getDb();
+  await db.execute({
+    sql: "INSERT INTO clients (token, name) VALUES (?, ?)",
+    args: [token, name],
+  });
   return { token, name };
 }
 
 // Delete a client together with all of its leads. Returns false if unknown.
-export function deleteClient(token: string): boolean {
-  const db = getDb();
-  if (!getClient(token)) return false;
-  const tx = db.transaction((t: string) => {
-    db.prepare("DELETE FROM leads WHERE client_token = ?").run(t);
-    db.prepare("DELETE FROM clients WHERE token = ?").run(t);
-  });
-  tx(token);
+export async function deleteClient(token: string): Promise<boolean> {
+  const db = await getDb();
+  if (!(await getClient(token))) return false;
+  // One transaction: drop the leads first (FK), then the client.
+  await db.batch(
+    [
+      { sql: "DELETE FROM leads WHERE client_token = ?", args: [token] },
+      { sql: "DELETE FROM clients WHERE token = ?", args: [token] },
+    ],
+    "write",
+  );
   return true;
 }
 
 // Auto-register a client the first time Clay sends a lead with an unknown token.
-export function ensureClient(token: string, fallbackName?: string): Client {
-  const existing = getClient(token);
+export async function ensureClient(
+  token: string,
+  fallbackName?: string,
+): Promise<Client> {
+  const existing = await getClient(token);
   if (existing) return existing;
   const name = fallbackName?.trim() || token;
-  getDb()
-    .prepare("INSERT INTO clients (token, name) VALUES (?, ?)")
-    .run(token, name);
+  const db = await getDb();
+  await db.execute({
+    sql: "INSERT INTO clients (token, name) VALUES (?, ?)",
+    args: [token, name],
+  });
   return { token, name };
 }
 
 // ---------- Leads ----------
 
-export function listLeads(clientToken: string): Lead[] {
-  return getDb()
-    .prepare(
-      "SELECT * FROM leads WHERE client_token = ? ORDER BY datetime(created_at) DESC",
-    )
-    .all(clientToken) as Lead[];
+export async function listLeads(clientToken: string): Promise<Lead[]> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: "SELECT * FROM leads WHERE client_token = ? ORDER BY datetime(created_at) DESC",
+    args: [clientToken],
+  });
+  return rs.rows.map(mapLead);
 }
 
-export function createLead(payload: WebhookPayload): Lead {
+export async function getLead(id: number): Promise<Lead | undefined> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: "SELECT * FROM leads WHERE id = ?",
+    args: [id],
+  });
+  return rs.rows[0] ? mapLead(rs.rows[0]) : undefined;
+}
+
+export async function createLead(payload: WebhookPayload): Promise<Lead> {
+  const db = await getDb();
   const now = new Date().toISOString();
   const token = payload.client_token!.trim();
-  const info = getDb()
-    .prepare(
-      `INSERT INTO leads (
+  const info = await db.execute({
+    sql: `INSERT INTO leads (
         client_token, name, company, title, linkedin_url, email,
         generated_message, research_summary, signal, status, comment,
         created_at, updated_at
       ) VALUES (
-        @client_token, @name, @company, @title, @linkedin_url, @email,
-        @generated_message, @research_summary, @signal, 'new', '',
-        @created_at, @updated_at
+        $client_token, $name, $company, $title, $linkedin_url, $email,
+        $generated_message, $research_summary, $signal, 'new', '',
+        $created_at, $updated_at
       )`,
-    )
-    .run({
+    args: {
       client_token: token,
       name: payload.name ?? "",
       company: payload.company ?? "",
@@ -107,31 +164,30 @@ export function createLead(payload: WebhookPayload): Lead {
       signal: payload.signal ?? "",
       created_at: now,
       updated_at: now,
-    });
-  return getDb()
-    .prepare("SELECT * FROM leads WHERE id = ?")
-    .get(info.lastInsertRowid) as Lead;
+    },
+  });
+  const created = await getLead(Number(info.lastInsertRowid));
+  return created!;
 }
 
-export function updateLead(
+export async function updateLead(
   id: number,
   changes: { status?: LeadStatus; comment?: string },
-): Lead | undefined {
-  const db = getDb();
-  const existing = db.prepare("SELECT * FROM leads WHERE id = ?").get(id) as
-    | Lead
-    | undefined;
+): Promise<Lead | undefined> {
+  const existing = await getLead(id);
   if (!existing) return undefined;
 
   const status = changes.status ?? existing.status;
   const comment =
     changes.comment !== undefined ? changes.comment : existing.comment;
 
-  db.prepare(
-    "UPDATE leads SET status = ?, comment = ?, updated_at = ? WHERE id = ?",
-  ).run(status, comment, new Date().toISOString(), id);
+  const db = await getDb();
+  await db.execute({
+    sql: "UPDATE leads SET status = ?, comment = ?, updated_at = ? WHERE id = ?",
+    args: [status, comment, new Date().toISOString(), id],
+  });
 
-  return db.prepare("SELECT * FROM leads WHERE id = ?").get(id) as Lead;
+  return getLead(id);
 }
 
 // ---------- KPIs & reporting ----------
@@ -180,8 +236,8 @@ function weekLabel(anyDayInWeek: Date): string {
   return `${dateFmt.format(start)} – ${dateFmtFull.format(end)}`;
 }
 
-export function computeKpis(clientToken: string): Kpis {
-  const leads = listLeads(clientToken);
+export async function computeKpis(clientToken: string): Promise<Kpis> {
+  const leads = await listLeads(clientToken);
   const weekStart = startOfIsoWeek(new Date());
 
   const outreachesThisWeek = leads.filter(
@@ -209,8 +265,10 @@ export function computeKpis(clientToken: string): Kpis {
   };
 }
 
-export function weeklyReport(clientToken: string): WeekReportRow[] {
-  const leads = listLeads(clientToken);
+export async function weeklyReport(
+  clientToken: string,
+): Promise<WeekReportRow[]> {
+  const leads = await listLeads(clientToken);
   const byWeek = new Map<string, { sample: Date; rows: Lead[] }>();
 
   for (const lead of leads) {

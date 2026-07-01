@@ -23,9 +23,9 @@ export async function POST(request: Request) {
   }
 
   // Register the client on first contact so new boards appear automatically.
-  ensureClient(clientToken, payload.company);
+  await ensureClient(clientToken, payload.company);
 
-  const lead = createLead({ ...payload, client_token: clientToken });
+  const lead = await createLead({ ...payload, client_token: clientToken });
 
   return NextResponse.json({ ok: true, id: lead.id }, { status: 201 });
 }
