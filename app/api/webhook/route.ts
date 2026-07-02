@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { createLead, ensureClient } from "@/lib/store";
 import type { WebhookPayload } from "@/lib/types";
 
@@ -24,24 +25,31 @@ function toPayload(fields: Record<string, unknown>): WebhookPayload {
   };
 }
 
-function formToRecord(raw: string): Record<string, string> {
+function paramsToRecord(params: URLSearchParams): Record<string, string> {
   const obj: Record<string, string> = {};
-  for (const [key, value] of new URLSearchParams(raw)) obj[key] = value;
+  for (const [key, value] of params) obj[key] = value;
   return obj;
 }
 
-// Parse the request body into a plain record, accepting either JSON or
+// Parse the request into a plain record, accepting either JSON or
 // application/x-www-form-urlencoded. Clay occasionally sends JSON with
 // unescaped quotes (invalid JSON); form encoding sidesteps that entirely,
 // and we also fall back to form parsing if a JSON body fails to parse.
+// If the body is empty, fall back to query parameters
+// (?name=...&company=...&linkedin_url=...&generated_message=...&signal=...&client_token=...).
 async function parseBody(
-  request: Request,
+  request: NextRequest,
 ): Promise<Record<string, unknown> | null> {
   const contentType = request.headers.get("content-type") ?? "";
-  const raw = await request.text();
+  const raw = (await request.text()).trim();
+
+  if (!raw) {
+    const query = request.nextUrl.searchParams;
+    return query.size > 0 ? paramsToRecord(query) : null;
+  }
 
   if (contentType.includes("application/x-www-form-urlencoded")) {
-    return formToRecord(raw);
+    return paramsToRecord(new URLSearchParams(raw));
   }
 
   try {
@@ -50,17 +58,20 @@ async function parseBody(
   } catch {
     // Not valid JSON — maybe it's form data sent with a wrong/missing
     // content-type. Only treat it as form data if it actually looks like it.
-    if (raw.includes("=")) return formToRecord(raw);
+    if (raw.includes("=")) return paramsToRecord(new URLSearchParams(raw));
     return null;
   }
 }
 
 // Clay POSTs a personalized outreach message here for each generated lead.
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const fields = await parseBody(request);
   if (!fields) {
     return NextResponse.json(
-      { error: "Body must be JSON or application/x-www-form-urlencoded" },
+      {
+        error:
+          "Provide fields as JSON, application/x-www-form-urlencoded, or query parameters",
+      },
       { status: 400 },
     );
   }
