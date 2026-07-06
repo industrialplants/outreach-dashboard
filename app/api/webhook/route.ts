@@ -86,6 +86,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Clay sends rows before they're enriched; skip anything without an actual
+  // outreach message so the board never fills up with empty leads.
+  if (!payload.generated_message?.trim()) {
+    return NextResponse.json({ ok: true, skipped: true });
+  }
+
   // Register the client on first contact so new boards appear automatically.
   await ensureClient(clientToken, payload.company);
 
