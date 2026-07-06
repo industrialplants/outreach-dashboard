@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type {
@@ -86,7 +87,14 @@ export default function Dashboard({
     <main className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden />
+          <Image
+            className="brand-logo"
+            src="/logo.png"
+            alt="industrial plants Logo"
+            width={32}
+            height={32}
+            priority
+          />
           <span className="brand-name">industrial plants</span>
           {role === "admin" && <span className="admin-badge">Admin</span>}
         </div>
