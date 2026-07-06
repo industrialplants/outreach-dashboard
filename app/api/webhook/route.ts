@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { createLead, ensureClient } from "@/lib/store";
+import { ensureClient, upsertLead } from "@/lib/store";
 import type { WebhookPayload } from "@/lib/types";
 
 // Coerce an arbitrary field value into a trimmed string (or undefined).
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
   // so the value stays a clean single line.
   const name = payload.name?.trim().replace(/\n/g, " ");
 
-  const lead = await createLead({ ...payload, client_token: clientToken, name });
+  const lead = await upsertLead({ ...payload, client_token: clientToken, name });
 
   return NextResponse.json({ ok: true, id: lead.id }, { status: 201 });
 }

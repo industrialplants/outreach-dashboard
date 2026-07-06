@@ -24,6 +24,24 @@ interface DashboardProps {
 
 type Tab = "leads" | "report" | "clients";
 
+// Sub-filter inside the Leads tab. "all" is the main view and hides
+// call_booked leads — those live only under their own filter.
+type LeadFilter = "all" | "new" | "approved" | "rejected" | "call_booked";
+
+const LEAD_FILTERS: { key: LeadFilter; label: string }[] = [
+  { key: "all", label: "Alle" },
+  { key: "new", label: "Neu" },
+  { key: "approved", label: "Freigegeben" },
+  { key: "rejected", label: "Abgelehnt" },
+  { key: "call_booked", label: "Call gebucht" },
+];
+
+function matchesFilter(lead: Lead, filter: LeadFilter): boolean {
+  // Main view shows everything except booked calls.
+  if (filter === "all") return lead.status !== "call_booked";
+  return lead.status === filter;
+}
+
 export default function Dashboard({
   role,
   adminToken,
@@ -35,6 +53,7 @@ export default function Dashboard({
 }: DashboardProps) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("leads");
+  const [leadFilter, setLeadFilter] = useState<LeadFilter>("all");
   const [isPending, startTransition] = useTransition();
 
   // Token used to authorize mutations against the API.
@@ -132,7 +151,28 @@ export default function Dashboard({
       ) : tab === "leads" ? (
         <>
           {kpis && <KpiRow kpis={kpis} />}
-          <LeadList leads={leads} onMutate={mutate} />
+          <nav className="lead-filters">
+            {LEAD_FILTERS.map((f) => {
+              const count = leads.filter((l) => matchesFilter(l, f.key)).length;
+              return (
+                <button
+                  key={f.key}
+                  className={
+                    leadFilter === f.key ? "filter-chip active" : "filter-chip"
+                  }
+                  onClick={() => setLeadFilter(f.key)}
+                >
+                  {f.label}
+                  <span className="filter-count">{count}</span>
+                </button>
+              );
+            })}
+          </nav>
+          <LeadList
+            leads={leads.filter((l) => matchesFilter(l, leadFilter))}
+            onMutate={mutate}
+            filtered={leadFilter !== "all"}
+          />
         </>
       ) : (
         <ReportTable report={report} />
@@ -166,20 +206,28 @@ function KpiRow({ kpis }: { kpis: Kpis }) {
 function LeadList({
   leads,
   onMutate,
+  filtered = false,
 }: {
   leads: Lead[];
   onMutate: (
     id: number,
     changes: { status?: LeadStatus; comment?: string },
   ) => void;
+  filtered?: boolean;
 }) {
   if (leads.length === 0) {
     return (
       <section className="empty">
-        <p>Noch keine Leads für dieses Board.</p>
-        <p className="muted">
-          Neue Leads von Clay erscheinen hier automatisch.
-        </p>
+        {filtered ? (
+          <p>Keine Leads in diesem Filter.</p>
+        ) : (
+          <>
+            <p>Noch keine Leads für dieses Board.</p>
+            <p className="muted">
+              Neue Leads von Clay erscheinen hier automatisch.
+            </p>
+          </>
+        )}
       </section>
     );
   }
