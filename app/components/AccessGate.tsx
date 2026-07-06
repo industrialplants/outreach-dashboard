@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 // Shown when no token is provided or the token doesn't match any board.
 export default function AccessGate({
   reason,
@@ -8,7 +10,14 @@ export default function AccessGate({
     <main className="gate">
       <div className="gate-card">
         <div className="brand">
-          <span className="brand-mark" aria-hidden />
+          <Image
+            className="brand-logo"
+            src="/logo.png"
+            alt="industrial plants Logo"
+            width={32}
+            height={32}
+            priority
+          />
           <span className="brand-name">industrial plants</span>
         </div>
         <h1>Outreach Dashboard</h1>
