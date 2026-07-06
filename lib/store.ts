@@ -314,7 +314,10 @@ export async function computeKpis(clientToken: string): Promise<Kpis> {
   const responseRate = sentLike === 0 ? 0 : responded / sentLike;
 
   const callsBooked = leads.filter((l) => l.status === "call_booked").length;
-  const pendingApproval = leads.filter((l) => l.status === "new").length;
+  // "new" and re-surfaced "revised" leads both await a (re-)approval.
+  const pendingApproval = leads.filter(
+    (l) => l.status === "new" || l.status === "revised",
+  ).length;
 
   return {
     outreachesThisWeek,
