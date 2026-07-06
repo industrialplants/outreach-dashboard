@@ -173,38 +173,56 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
 // Insert a lead, or — if one with the same linkedin_url already exists for this
 // client — refresh its generated content instead of creating a duplicate.
 // Clay re-sends the same person as it enriches them; we keep one row per person.
-// The lead's status and comment are left untouched so prior review survives.
+//
+// Done atomically via INSERT ... ON CONFLICT against the partial unique index
+// idx_leads_client_linkedin, so even concurrent webhook calls for the same
+// person can't create a duplicate. On conflict only the generated content is
+// refreshed; status and comment (human review) and created_at are preserved.
+// Leads without a linkedin_url can't be matched, so they are always inserted.
 export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
   const token = payload.client_token!.trim();
   const linkedin = payload.linkedin_url?.trim();
 
-  // Only dedupe when we have a linkedin_url to match on.
-  if (linkedin) {
-    const db = await getDb();
-    const existing = await db.execute({
-      sql: "SELECT id FROM leads WHERE client_token = ? AND linkedin_url = ? ORDER BY id LIMIT 1",
-      args: [token, linkedin],
-    });
-    if (existing.rows[0]) {
-      const id = Number(existing.rows[0].id);
-      await db.execute({
-        sql: `UPDATE leads
-                 SET generated_message = ?, signal = ?, research_summary = ?,
-                     updated_at = ?
-               WHERE id = ?`,
-        args: [
-          payload.generated_message ?? "",
-          payload.signal ?? "",
-          payload.research_summary ?? "",
-          new Date().toISOString(),
-          id,
-        ],
-      });
-      return (await getLead(id))!;
-    }
-  }
+  if (!linkedin) return createLead(payload);
 
-  return createLead(payload);
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.execute({
+    sql: `INSERT INTO leads (
+        client_token, name, company, title, linkedin_url, email,
+        generated_message, research_summary, signal, status, comment,
+        created_at, updated_at
+      ) VALUES (
+        $client_token, $name, $company, $title, $linkedin_url, $email,
+        $generated_message, $research_summary, $signal, 'new', '',
+        $created_at, $updated_at
+      )
+      ON CONFLICT(client_token, linkedin_url) WHERE linkedin_url <> ''
+      DO UPDATE SET
+        generated_message = excluded.generated_message,
+        signal            = excluded.signal,
+        research_summary  = excluded.research_summary,
+        updated_at        = excluded.updated_at`,
+    args: {
+      client_token: token,
+      name: payload.name ?? "",
+      company: payload.company ?? "",
+      title: payload.title ?? "",
+      linkedin_url: linkedin,
+      email: payload.email ?? "",
+      generated_message: payload.generated_message ?? "",
+      research_summary: payload.research_summary ?? "",
+      signal: payload.signal ?? "",
+      created_at: now,
+      updated_at: now,
+    },
+  });
+
+  const rs = await db.execute({
+    sql: "SELECT * FROM leads WHERE client_token = ? AND linkedin_url = ?",
+    args: [token, linkedin],
+  });
+  return mapLead(rs.rows[0]);
 }
 
 export async function updateLead(

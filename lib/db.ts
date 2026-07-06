@@ -52,6 +52,11 @@ async function migrate(db: Client): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_leads_client ON leads(client_token);
     CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+
+    -- Enforce one lead per (client, linkedin_url). Partial so the many leads
+    -- without a linkedin_url (empty string) don't collide. Backs upsertLead.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_client_linkedin
+      ON leads(client_token, linkedin_url) WHERE linkedin_url <> '';
   `);
 }
 
