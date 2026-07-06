@@ -88,6 +88,19 @@ export default function Dashboard({
     startTransition(() => router.refresh());
   }
 
+  async function removeLead(id: number) {
+    const res = await fetch(`/api/leads/${id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: authToken }),
+    });
+    if (!res.ok) {
+      alert("Löschen fehlgeschlagen. Bitte erneut versuchen.");
+      return;
+    }
+    startTransition(() => router.refresh());
+  }
+
   const noBoard = role === "admin" && !selected;
 
   return (
@@ -186,6 +199,7 @@ export default function Dashboard({
           <LeadList
             leads={leads.filter((l) => matchesFilter(l, leadFilter))}
             onMutate={mutate}
+            onDelete={role === "admin" ? removeLead : undefined}
             filtered={leadFilter !== "all"}
           />
         </>
@@ -221,6 +235,7 @@ function KpiRow({ kpis }: { kpis: Kpis }) {
 function LeadList({
   leads,
   onMutate,
+  onDelete,
   filtered = false,
 }: {
   leads: Lead[];
@@ -228,6 +243,7 @@ function LeadList({
     id: number,
     changes: { status?: LeadStatus; comment?: string },
   ) => void;
+  onDelete?: (id: number) => void;
   filtered?: boolean;
 }) {
   if (leads.length === 0) {
@@ -249,7 +265,12 @@ function LeadList({
   return (
     <section className="leads">
       {leads.map((lead) => (
-        <LeadCard key={lead.id} lead={lead} onMutate={onMutate} />
+        <LeadCard
+          key={lead.id}
+          lead={lead}
+          onMutate={onMutate}
+          onDelete={onDelete}
+        />
       ))}
     </section>
   );
@@ -258,12 +279,14 @@ function LeadList({
 function LeadCard({
   lead,
   onMutate,
+  onDelete,
 }: {
   lead: Lead;
   onMutate: (
     id: number,
     changes: { status?: LeadStatus; comment?: string },
   ) => void;
+  onDelete?: (id: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [showComment, setShowComment] = useState(false);
@@ -322,6 +345,16 @@ function LeadCard({
         <button className="btn ghost toggle" onClick={() => setOpen((v) => !v)}>
           {open ? "Nachricht ▲" : "Nachricht ▼"}
         </button>
+        {onDelete && (
+          <button
+            className="btn danger"
+            onClick={() => {
+              if (window.confirm("Wirklich löschen?")) onDelete(lead.id);
+            }}
+          >
+            Löschen
+          </button>
+        )}
       </div>
 
       {showComment && (

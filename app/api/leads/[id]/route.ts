@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { getClient, getLead, isValidStatus, updateLead } from "@/lib/store";
+import {
+  deleteLead,
+  getClient,
+  getLead,
+  isValidStatus,
+  updateLead,
+} from "@/lib/store";
 import { ADMIN_TOKEN } from "@/lib/db";
 
 interface PatchBody {
@@ -50,4 +56,33 @@ export async function PATCH(
   });
 
   return NextResponse.json({ ok: true, lead: updated });
+}
+
+// Permanently delete a lead. Admin only — clients can't delete leads.
+export async function DELETE(
+  request: Request,
+  ctx: RouteContext<"/api/leads/[id]">,
+) {
+  const { id } = await ctx.params;
+  const leadId = Number(id);
+  if (!Number.isInteger(leadId)) {
+    return NextResponse.json({ error: "Invalid lead id" }, { status: 400 });
+  }
+
+  let body: { token?: string };
+  try {
+    body = (await request.json()) as { token?: string };
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (body.token?.trim() !== ADMIN_TOKEN) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  if (!(await deleteLead(leadId))) {
+    return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true });
 }

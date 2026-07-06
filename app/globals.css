@@ -380,6 +380,15 @@ code {
   background: transparent;
   color: var(--muted-2);
 }
+.btn.danger {
+  background: transparent;
+  color: var(--red);
+  border-color: rgba(255, 90, 106, 0.4);
+}
+.btn.danger:hover {
+  border-color: var(--red);
+  background: rgba(255, 90, 106, 0.12);
+}
 .btn.toggle {
   margin-left: auto;
 }

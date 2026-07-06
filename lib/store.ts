@@ -250,6 +250,16 @@ export async function updateLead(
   return getLead(id);
 }
 
+// Permanently delete a lead. Returns false if no row matched.
+export async function deleteLead(id: number): Promise<boolean> {
+  const db = await getDb();
+  const res = await db.execute({
+    sql: "DELETE FROM leads WHERE id = ?",
+    args: [id],
+  });
+  return res.rowsAffected > 0;
+}
+
 // ---------- KPIs & reporting ----------
 
 // Monday 00:00 (local) of the week containing `d`.
