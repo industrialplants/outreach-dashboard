@@ -27,11 +27,18 @@ type Tab = "leads" | "report" | "clients";
 
 // Sub-filter inside the Leads tab. "all" is the main view and hides
 // call_booked leads — those live only under their own filter.
-type LeadFilter = "all" | "new" | "approved" | "rejected" | "call_booked";
+type LeadFilter =
+  | "all"
+  | "new"
+  | "revised"
+  | "approved"
+  | "rejected"
+  | "call_booked";
 
 const LEAD_FILTERS: { key: LeadFilter; label: string }[] = [
   { key: "all", label: "Alle" },
   { key: "new", label: "Neu" },
+  { key: "revised", label: "Überarbeitet" },
   { key: "approved", label: "Freigegeben" },
   { key: "rejected", label: "Abgelehnt" },
   { key: "call_booked", label: "Call gebucht" },

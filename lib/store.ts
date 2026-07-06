@@ -176,8 +176,9 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
 //
 // Done atomically via INSERT ... ON CONFLICT against the partial unique index
 // idx_leads_client_linkedin, so even concurrent webhook calls for the same
-// person can't create a duplicate. On conflict only the generated content is
-// refreshed; status and comment (human review) and created_at are preserved.
+// person can't create a duplicate. On conflict the generated content is
+// refreshed and an already-reviewed lead (status != 'new') is flagged
+// 'revised' so it resurfaces; the comment and created_at are preserved.
 // Leads without a linkedin_url can't be matched, so they are always inserted.
 export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
   const token = payload.client_token!.trim();
@@ -202,6 +203,10 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
         generated_message = excluded.generated_message,
         signal            = excluded.signal,
         research_summary  = excluded.research_summary,
+        -- A re-send of an already-reviewed lead flags it as revised so it
+        -- resurfaces for another look; untouched 'new' leads stay 'new'.
+        status            = CASE WHEN leads.status = 'new'
+                                 THEN 'new' ELSE 'revised' END,
         updated_at        = excluded.updated_at`,
     args: {
       client_token: token,

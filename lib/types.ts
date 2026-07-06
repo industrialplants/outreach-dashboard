@@ -2,6 +2,7 @@
 
 export type LeadStatus =
   | "new"
+  | "revised"
   | "approved"
   | "rejected"
   | "sent"
@@ -11,6 +12,7 @@ export type LeadStatus =
 // German labels shown in the UI, in the funnel order the user specified.
 export const STATUS_LABELS: Record<LeadStatus, string> = {
   new: "Neu",
+  revised: "Überarbeitet",
   approved: "Freigegeben",
   rejected: "Abgelehnt",
   sent: "Gesendet",
@@ -20,6 +22,7 @@ export const STATUS_LABELS: Record<LeadStatus, string> = {
 
 export const STATUS_ORDER: LeadStatus[] = [
   "new",
+  "revised",
   "approved",
   "rejected",
   "sent",

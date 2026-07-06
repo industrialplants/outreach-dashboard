@@ -302,6 +302,10 @@ code {
   color: var(--blue);
   border-color: rgba(90, 169, 255, 0.4);
 }
+.status-revised {
+  color: #c39bff;
+  border-color: rgba(195, 155, 255, 0.45);
+}
 .status-approved {
   color: var(--green);
   border-color: rgba(47, 212, 122, 0.4);
