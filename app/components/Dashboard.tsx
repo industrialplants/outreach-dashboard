@@ -297,9 +297,8 @@ function LeadCard({
       <div className="lead-head">
         <div className="lead-who">
           <div className="lead-name">{lead.name || "—"}</div>
-          <div className="lead-sub">
-            {[lead.title, lead.company].filter(Boolean).join(" · ") || "—"}
-          </div>
+          <div className="lead-sub">{lead.company || "—"}</div>
+          {lead.title && <div className="lead-title">{lead.title}</div>}
         </div>
         <div className="lead-head-right">
           <span className={`status-pill status-${lead.status}`}>
