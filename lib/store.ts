@@ -310,8 +310,9 @@ export async function computeKpis(clientToken: string): Promise<Kpis> {
   const leads = await listLeads(clientToken);
   const weekStart = startOfIsoWeek(new Date());
 
+  // An outreach only counts once it has actually been sent this week.
   const outreachesThisWeek = leads.filter(
-    (l) => new Date(l.created_at) >= weekStart,
+    (l) => l.status === "sent" && new Date(l.updated_at) >= weekStart,
   ).length;
 
   // Response rate is measured over leads that actually left the building.

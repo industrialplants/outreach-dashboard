@@ -32,6 +32,7 @@ type LeadFilter =
   | "new"
   | "revised"
   | "approved"
+  | "sent"
   | "rejected"
   | "call_booked";
 
@@ -40,6 +41,7 @@ const LEAD_FILTERS: { key: LeadFilter; label: string }[] = [
   { key: "new", label: "Neu" },
   { key: "revised", label: "Überarbeitet" },
   { key: "approved", label: "Freigegeben" },
+  { key: "sent", label: "Gesendet" },
   { key: "rejected", label: "Abgelehnt" },
   { key: "call_booked", label: "Call gebucht" },
 ];
@@ -338,6 +340,14 @@ function LeadCard({
         >
           Ablehnen
         </button>
+        {lead.status === "approved" && (
+          <button
+            className="btn sent"
+            onClick={() => onMutate(lead.id, { status: "sent" })}
+          >
+            Gesendet
+          </button>
+        )}
         <button className="btn ghost" onClick={() => setShowComment((v) => !v)}>
           Kommentar
         </button>

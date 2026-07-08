@@ -382,6 +382,10 @@ code {
   border-color: rgba(255, 90, 106, 0.5);
   color: var(--red);
 }
+.btn.sent {
+  border-color: rgba(245, 181, 68, 0.5);
+  color: var(--amber);
+}
 .btn.ghost {
   background: transparent;
   color: var(--muted-2);
