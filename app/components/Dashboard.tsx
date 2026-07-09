@@ -300,7 +300,9 @@ function LeadCard({
         <div className="lead-who">
           <div className="lead-name">{lead.name || "—"}</div>
           <div className="lead-sub">{lead.company || "—"}</div>
-          {lead.title && <div className="lead-title">{lead.title}</div>}
+          {lead.title.trim() && lead.title.trim() !== "0" && (
+            <div className="lead-title">{lead.title}</div>
+          )}
         </div>
         <div className="lead-head-right">
           <span className={`status-pill status-${lead.status}`}>
