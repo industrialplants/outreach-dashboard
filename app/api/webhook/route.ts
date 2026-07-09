@@ -76,6 +76,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Debug: check whether Clay actually sends a "title" and what it looks like.
+  console.log("[webhook] incoming title:", JSON.stringify(fields.title));
+
   const payload = toPayload(fields);
 
   const clientToken = payload.client_token?.trim();
