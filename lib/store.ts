@@ -203,6 +203,7 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
         generated_message = excluded.generated_message,
         signal            = excluded.signal,
         research_summary  = excluded.research_summary,
+        title             = excluded.title,
         -- A re-send of an already-reviewed lead flags it as revised so it
         -- resurfaces for another look; untouched 'new' leads stay 'new'.
         status            = CASE WHEN leads.status = 'new'
