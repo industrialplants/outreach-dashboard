@@ -245,7 +245,7 @@ function LeadList({
   leads: Lead[];
   onMutate: (
     id: number,
-    changes: { status?: LeadStatus; comment?: string },
+    changes: { status?: LeadStatus; comment?: string; generated_message?: string },
   ) => void;
   onDelete?: (id: number) => void;
   filtered?: boolean;
