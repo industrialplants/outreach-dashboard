@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "industrial plants — Outreach Dashboard",
   description: "KI-Outreach für B2B-Kunden. Leads freigeben, Status verfolgen, KPIs sehen.",
+  icons: {
+    icon: '/logo.png',
+  },
 };
 
 export default function RootLayout({
