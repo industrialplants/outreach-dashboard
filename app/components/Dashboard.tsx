@@ -395,7 +395,7 @@ function LeadCard({
               <button
                 className="btn small"
                 onClick={async () => {
-                  await mutate(lead.id, { generated_message: editMessage });
+                  await onMutate(lead.id, { generated_message: editMessage });
                   setIsEditing(false);
                 }}
               >
