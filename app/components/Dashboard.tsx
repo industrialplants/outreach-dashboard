@@ -363,7 +363,7 @@ function LeadCard({
             <button
               className="btn ghost"
               onClick={() => {
-                setEditingId(lead.id);
+                setIsEditing(true);
                 setEditMessage(lead.generated_message || "");
               }}
             >
@@ -381,7 +381,7 @@ function LeadCard({
         )}
       </div>
 
-      {editingId === lead.id && (
+      {isEditing && (
           <div className="comment-box">
             <textarea
               value={editMessage}
@@ -394,14 +394,14 @@ function LeadCard({
                 className="btn small"
                 onClick={async () => {
                   await mutate(lead.id, { generated_message: editMessage });
-                  setEditingId(null);
+                  setIsEditing(false);
                 }}
               >
                 Speichern
               </button>
               <button
                 className="btn ghost"
-                onClick={() => setEditingId(null)}
+                onClick={() => setIsEditing(false)}
               >
                 Abbrechen
               </button>
