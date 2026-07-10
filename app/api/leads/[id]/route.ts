@@ -51,8 +51,9 @@ export async function PATCH(
   }
 
   const updated = await updateLead(leadId, {
-    status: isValidStatus(body.status) ? body.status : undefined,
+    status: body.generated_message ? "revised" : (isValidStatus(body.status) ? body.status : undefined),
     comment: body.comment,
+    generated_message: body.generated_message,
   });
 
   return NextResponse.json({ ok: true, lead: updated });

@@ -233,7 +233,7 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
 
 export async function updateLead(
   id: number,
-  changes: { status?: LeadStatus; comment?: string },
+  changes: { status?: LeadStatus; comment?: string; generated_message?: string },
 ): Promise<Lead | undefined> {
   const existing = await getLead(id);
   if (!existing) return undefined;
@@ -241,11 +241,13 @@ export async function updateLead(
   const status = changes.status ?? existing.status;
   const comment =
     changes.comment !== undefined ? changes.comment : existing.comment;
+  const generated_message =
+    changes.generated_message !== undefined ? changes.generated_message : existing.generated_message;
 
   const db = await getDb();
   await db.execute({
-    sql: "UPDATE leads SET status = ?, comment = ?, updated_at = ? WHERE id = ?",
-    args: [status, comment, new Date().toISOString(), id],
+    sql: "UPDATE leads SET status = ?, comment = ?, generated_message = ?, updated_at = ? WHERE id = ?",
+    args: [status, comment, generated_message, new Date().toISOString(), id],
   });
 
   return getLead(id);

@@ -65,6 +65,8 @@ export default function Dashboard({
   const [tab, setTab] = useState<Tab>("leads");
   const [leadFilter, setLeadFilter] = useState<LeadFilter>("all");
   const [isPending, startTransition] = useTransition();
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editMessage, setEditMessage] = useState("");
 
   // Token used to authorize mutations against the API.
   const authToken = role === "admin" ? adminToken! : selected!.token;
@@ -75,7 +77,7 @@ export default function Dashboard({
 
   async function mutate(
     id: number,
-    changes: { status?: LeadStatus; comment?: string },
+    changes: { status?: LeadStatus; comment?: string; generated_message?: string },
   ) {
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
@@ -357,18 +359,56 @@ function LeadCard({
           {open ? "Nachricht ▲" : "Nachricht ▼"}
         </button>
         {onDelete && (
-          <button
-            className="btn danger"
-            onClick={() => {
-              if (window.confirm("Wirklich löschen?")) onDelete(lead.id);
-            }}
-          >
-            Löschen
-          </button>
+          <>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setEditingId(lead.id);
+                setEditMessage(lead.generated_message || "");
+              }}
+            >
+              Bearbeiten
+            </button>
+            <button
+              className="btn danger"
+              onClick={() => {
+                if (window.confirm("Wirklich löschen?")) onDelete(lead.id);
+              }}
+            >
+              Löschen
+            </button>
+          </>
         )}
       </div>
 
-      {showComment && (
+      {editingId === lead.id && (
+          <div className="comment-box">
+            <textarea
+              value={editMessage}
+              onChange={(e) => setEditMessage(e.target.value)}
+              rows={5}
+              style={{ width: "100%", resize: "vertical" }}
+            />
+            <div className="comment-actions">
+              <button
+                className="btn small"
+                onClick={async () => {
+                  await mutate(lead.id, { generated_message: editMessage });
+                  setEditingId(null);
+                }}
+              >
+                Speichern
+              </button>
+              <button
+                className="btn ghost"
+                onClick={() => setEditingId(null)}
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        )}
+        {showComment && (
         <div className="comment-box">
           <textarea
             value={comment}
