@@ -11,6 +11,7 @@ import { ADMIN_TOKEN } from "@/lib/db";
 interface PatchBody {
   status?: string;
   comment?: string;
+  generated_message?: string;
   token?: string; // caller's board token, used to authorize the change
 }
 
