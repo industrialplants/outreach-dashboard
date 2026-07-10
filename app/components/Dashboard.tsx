@@ -295,6 +295,8 @@ function LeadCard({
   const [open, setOpen] = useState(false);
   const [showComment, setShowComment] = useState(false);
   const [comment, setComment] = useState(lead.comment);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editMessage, setEditMessage] = useState(lead.generated_message || "");
 
   return (
     <article className="lead">
