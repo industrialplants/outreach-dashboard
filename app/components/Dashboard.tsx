@@ -360,26 +360,24 @@ function LeadCard({
         <button className="btn ghost toggle" onClick={() => setOpen((v) => !v)}>
           {open ? "Nachricht ▲" : "Nachricht ▼"}
         </button>
+        <button
+          className="btn ghost"
+          onClick={() => {
+            setIsEditing(true);
+            setEditMessage(lead.generated_message || "");
+          }}
+        >
+          Bearbeiten
+        </button>
         {onDelete && (
-          <>
-            <button
-              className="btn ghost"
-              onClick={() => {
-                setIsEditing(true);
-                setEditMessage(lead.generated_message || "");
-              }}
-            >
-              Bearbeiten
-            </button>
-            <button
-              className="btn danger"
-              onClick={() => {
-                if (window.confirm("Wirklich löschen?")) onDelete(lead.id);
-              }}
-            >
-              Löschen
-            </button>
-          </>
+          <button
+            className="btn danger"
+            onClick={() => {
+              if (window.confirm("Wirklich löschen?")) onDelete(lead.id);
+            }}
+          >
+            Löschen
+          </button>
         )}
       </div>
 
