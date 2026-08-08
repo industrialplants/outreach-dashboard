@@ -80,6 +80,9 @@ export async function POST(request: NextRequest) {
 
   // Debug: check whether Clay actually sends a "title" and what it looks like.
   console.log("[webhook] incoming title:", JSON.stringify(fields.title));
+  console.log("[webhook] incoming email_subject:", JSON.stringify(fields.email_subject));
+  console.log("[webhook] incoming email_body:", JSON.stringify(fields.email_body));
+  console.log("[webhook] all incoming keys:", JSON.stringify(Object.keys(fields)));
 
   const payload = toPayload(fields);
 
