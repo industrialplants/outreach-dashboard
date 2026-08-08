@@ -469,6 +469,12 @@ code {
   padding: 12px;
 }
 
+.email-subject {
+  margin: 0 0 6px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .research {
   margin: 0;
   font-size: 13.5px;

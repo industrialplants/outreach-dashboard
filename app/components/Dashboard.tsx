@@ -437,9 +437,20 @@ function LeadCard({
       {open && (
         <div className="lead-detail">
           <div className="detail-block">
-            <div className="detail-label">Generierte Nachricht</div>
+            <div className="detail-label">Generierte Nachricht (LinkedIn)</div>
             <p className="message">{lead.generated_message || "—"}</p>
           </div>
+          {(lead.email_subject || lead.email_body) && (
+            <div className="detail-block">
+              <div className="detail-label">Generierte E-Mail</div>
+              {lead.email_subject && (
+                <p className="email-subject">
+                  <strong>Betreff:</strong> {lead.email_subject}
+                </p>
+              )}
+              <p className="message">{lead.email_body || "—"}</p>
+            </div>
+          )}
           {lead.research_summary && (
             <div className="detail-block">
               <div className="detail-label">Research</div>

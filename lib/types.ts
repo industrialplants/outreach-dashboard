@@ -39,6 +39,8 @@ export interface Lead {
   linkedin_url: string;
   email: string;
   generated_message: string;
+  email_subject: string;
+  email_body: string;
   research_summary: string;
   signal: string;
   status: LeadStatus;
@@ -83,6 +85,8 @@ export interface WebhookPayload {
   linkedin_url?: string;
   email?: string;
   generated_message?: string;
+  email_subject?: string;
+  email_body?: string;
   research_summary?: string;
   signal?: string;
   client_token?: string;

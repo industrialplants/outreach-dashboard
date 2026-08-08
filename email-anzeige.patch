@@ -1,0 +1,214 @@
+diff --git a/app/api/webhook/route.ts b/app/api/webhook/route.ts
+index 96d0866..c52171d 100644
+--- a/app/api/webhook/route.ts
++++ b/app/api/webhook/route.ts
+@@ -19,6 +19,8 @@ function toPayload(fields: Record<string, unknown>): WebhookPayload {
+     linkedin_url: str(fields.linkedin_url),
+     email: str(fields.email),
+     generated_message: str(fields.generated_message),
++    email_subject: str(fields.email_subject),
++    email_body: str(fields.email_body),
+     research_summary: str(fields.research_summary),
+     signal: str(fields.signal),
+     client_token: str(fields.client_token),
+@@ -90,8 +92,9 @@ export async function POST(request: NextRequest) {
+   }
+ 
+   // Clay sends rows before they're enriched; skip anything without an actual
+-  // outreach message so the board never fills up with empty leads.
+-  if (!payload.generated_message?.trim()) {
++  // outreach message (LinkedIn or email) so the board never fills up with
++  // empty leads.
++  if (!payload.generated_message?.trim() && !payload.email_body?.trim()) {
+     return NextResponse.json({ ok: true, skipped: true });
+   }
+ 
+@@ -114,6 +117,6 @@ export async function GET() {
+     endpoint: "clay outreach webhook",
+     accepts: "application/json or application/x-www-form-urlencoded",
+     expects:
+-      "POST { name, company, title, linkedin_url, email, generated_message, research_summary, signal, client_token }",
++      "POST { name, company, title, linkedin_url, email, generated_message, email_subject, email_body, research_summary, signal, client_token }",
+   });
+ }
+diff --git a/app/components/Dashboard.tsx b/app/components/Dashboard.tsx
+index 6a63865..7a8c04b 100644
+--- a/app/components/Dashboard.tsx
++++ b/app/components/Dashboard.tsx
+@@ -437,9 +437,20 @@ function LeadCard({
+       {open && (
+         <div className="lead-detail">
+           <div className="detail-block">
+-            <div className="detail-label">Generierte Nachricht</div>
++            <div className="detail-label">Generierte Nachricht (LinkedIn)</div>
+             <p className="message">{lead.generated_message || "—"}</p>
+           </div>
++          {(lead.email_subject || lead.email_body) && (
++            <div className="detail-block">
++              <div className="detail-label">Generierte E-Mail</div>
++              {lead.email_subject && (
++                <p className="email-subject">
++                  <strong>Betreff:</strong> {lead.email_subject}
++                </p>
++              )}
++              <p className="message">{lead.email_body || "—"}</p>
++            </div>
++          )}
+           {lead.research_summary && (
+             <div className="detail-block">
+               <div className="detail-label">Research</div>
+diff --git a/app/globals.css b/app/globals.css
+index 64e0181..4f3e7dc 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -469,6 +469,12 @@ code {
+   padding: 12px;
+ }
+ 
++.email-subject {
++  margin: 0 0 6px;
++  font-size: 14px;
++  line-height: 1.5;
++}
++
+ .research {
+   margin: 0;
+   font-size: 13.5px;
+diff --git a/lib/db.ts b/lib/db.ts
+index 2068d9a..b15c610 100644
+--- a/lib/db.ts
++++ b/lib/db.ts
+@@ -41,6 +41,8 @@ async function migrate(db: Client): Promise<void> {
+       linkedin_url      TEXT NOT NULL DEFAULT '',
+       email             TEXT NOT NULL DEFAULT '',
+       generated_message TEXT NOT NULL DEFAULT '',
++      email_subject     TEXT NOT NULL DEFAULT '',
++      email_body        TEXT NOT NULL DEFAULT '',
+       research_summary  TEXT NOT NULL DEFAULT '',
+       signal            TEXT NOT NULL DEFAULT '',
+       status            TEXT NOT NULL DEFAULT 'new',
+@@ -58,6 +60,22 @@ async function migrate(db: Client): Promise<void> {
+     CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_client_linkedin
+       ON leads(client_token, linkedin_url) WHERE linkedin_url <> '';
+   `);
++
++  // The leads table already exists in production without these two columns.
++  // CREATE TABLE IF NOT EXISTS above is a no-op there, so add them here.
++  // SQLite/libsql has no "ADD COLUMN IF NOT EXISTS", so check first.
++  const cols = await db.execute("PRAGMA table_info(leads)");
++  const existing = new Set(cols.rows.map((r) => String(r.name)));
++  if (!existing.has("email_subject")) {
++    await db.execute(
++      "ALTER TABLE leads ADD COLUMN email_subject TEXT NOT NULL DEFAULT ''",
++    );
++  }
++  if (!existing.has("email_body")) {
++    await db.execute(
++      "ALTER TABLE leads ADD COLUMN email_body TEXT NOT NULL DEFAULT ''",
++    );
++  }
+ }
+ 
+ // Seed a couple of demo clients + sample leads on first run so the dashboard
+@@ -203,11 +221,11 @@ async function seed(db: Client): Promise<void> {
+     stmts.push({
+       sql: `INSERT INTO leads (
+         client_token, name, company, title, linkedin_url, email,
+-        generated_message, research_summary, signal, status, comment,
++        generated_message, email_subject, email_body, research_summary, signal, status, comment,
+         created_at, updated_at
+       ) VALUES (
+         $client_token, $name, $company, $title, $linkedin_url, $email,
+-        $generated_message, $research_summary, $signal, $status, $comment,
++        $generated_message, '', '', $research_summary, $signal, $status, $comment,
+         $created_at, $updated_at
+       )`,
+       args: { ...r, updated_at: r.created_at },
+diff --git a/lib/store.ts b/lib/store.ts
+index 34a5200..f0fcb76 100644
+--- a/lib/store.ts
++++ b/lib/store.ts
+@@ -29,6 +29,8 @@ function mapLead(r: Row): Lead {
+     linkedin_url: String(r.linkedin_url),
+     email: String(r.email),
+     generated_message: String(r.generated_message),
++    email_subject: String(r.email_subject),
++    email_body: String(r.email_body),
+     research_summary: String(r.research_summary),
+     signal: String(r.signal),
+     status: String(r.status) as LeadStatus,
+@@ -145,11 +147,11 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
+   const info = await db.execute({
+     sql: `INSERT INTO leads (
+         client_token, name, company, title, linkedin_url, email,
+-        generated_message, research_summary, signal, status, comment,
++        generated_message, email_subject, email_body, research_summary, signal, status, comment,
+         created_at, updated_at
+       ) VALUES (
+         $client_token, $name, $company, $title, $linkedin_url, $email,
+-        $generated_message, $research_summary, $signal, 'new', '',
++        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '',
+         $created_at, $updated_at
+       )`,
+     args: {
+@@ -160,6 +162,8 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
+       linkedin_url: payload.linkedin_url ?? "",
+       email: payload.email ?? "",
+       generated_message: payload.generated_message ?? "",
++      email_subject: payload.email_subject ?? "",
++      email_body: payload.email_body ?? "",
+       research_summary: payload.research_summary ?? "",
+       signal: payload.signal ?? "",
+       created_at: now,
+@@ -191,16 +195,18 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
+   await db.execute({
+     sql: `INSERT INTO leads (
+         client_token, name, company, title, linkedin_url, email,
+-        generated_message, research_summary, signal, status, comment,
++        generated_message, email_subject, email_body, research_summary, signal, status, comment,
+         created_at, updated_at
+       ) VALUES (
+         $client_token, $name, $company, $title, $linkedin_url, $email,
+-        $generated_message, $research_summary, $signal, 'new', '',
++        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '',
+         $created_at, $updated_at
+       )
+       ON CONFLICT(client_token, linkedin_url) WHERE linkedin_url <> ''
+       DO UPDATE SET
+         generated_message = excluded.generated_message,
++        email_subject     = excluded.email_subject,
++        email_body        = excluded.email_body,
+         signal            = excluded.signal,
+         research_summary  = excluded.research_summary,
+         title             = excluded.title,
+@@ -217,6 +223,8 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
+       linkedin_url: linkedin,
+       email: payload.email ?? "",
+       generated_message: payload.generated_message ?? "",
++      email_subject: payload.email_subject ?? "",
++      email_body: payload.email_body ?? "",
+       research_summary: payload.research_summary ?? "",
+       signal: payload.signal ?? "",
+       created_at: now,
+diff --git a/lib/types.ts b/lib/types.ts
+index def94b0..8ba5e9e 100644
+--- a/lib/types.ts
++++ b/lib/types.ts
+@@ -39,6 +39,8 @@ export interface Lead {
+   linkedin_url: string;
+   email: string;
+   generated_message: string;
++  email_subject: string;
++  email_body: string;
+   research_summary: string;
+   signal: string;
+   status: LeadStatus;
+@@ -83,6 +85,8 @@ export interface WebhookPayload {
+   linkedin_url?: string;
+   email?: string;
+   generated_message?: string;
++  email_subject?: string;
++  email_body?: string;
+   research_summary?: string;
+   signal?: string;
+   client_token?: string;

@@ -29,6 +29,8 @@ function mapLead(r: Row): Lead {
     linkedin_url: String(r.linkedin_url),
     email: String(r.email),
     generated_message: String(r.generated_message),
+    email_subject: String(r.email_subject),
+    email_body: String(r.email_body),
     research_summary: String(r.research_summary),
     signal: String(r.signal),
     status: String(r.status) as LeadStatus,
@@ -145,11 +147,11 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
   const info = await db.execute({
     sql: `INSERT INTO leads (
         client_token, name, company, title, linkedin_url, email,
-        generated_message, research_summary, signal, status, comment,
+        generated_message, email_subject, email_body, research_summary, signal, status, comment,
         created_at, updated_at
       ) VALUES (
         $client_token, $name, $company, $title, $linkedin_url, $email,
-        $generated_message, $research_summary, $signal, 'new', '',
+        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '',
         $created_at, $updated_at
       )`,
     args: {
@@ -160,6 +162,8 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
       linkedin_url: payload.linkedin_url ?? "",
       email: payload.email ?? "",
       generated_message: payload.generated_message ?? "",
+      email_subject: payload.email_subject ?? "",
+      email_body: payload.email_body ?? "",
       research_summary: payload.research_summary ?? "",
       signal: payload.signal ?? "",
       created_at: now,
@@ -191,16 +195,18 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
   await db.execute({
     sql: `INSERT INTO leads (
         client_token, name, company, title, linkedin_url, email,
-        generated_message, research_summary, signal, status, comment,
+        generated_message, email_subject, email_body, research_summary, signal, status, comment,
         created_at, updated_at
       ) VALUES (
         $client_token, $name, $company, $title, $linkedin_url, $email,
-        $generated_message, $research_summary, $signal, 'new', '',
+        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '',
         $created_at, $updated_at
       )
       ON CONFLICT(client_token, linkedin_url) WHERE linkedin_url <> ''
       DO UPDATE SET
         generated_message = excluded.generated_message,
+        email_subject     = excluded.email_subject,
+        email_body        = excluded.email_body,
         signal            = excluded.signal,
         research_summary  = excluded.research_summary,
         title             = excluded.title,
@@ -217,6 +223,8 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
       linkedin_url: linkedin,
       email: payload.email ?? "",
       generated_message: payload.generated_message ?? "",
+      email_subject: payload.email_subject ?? "",
+      email_body: payload.email_body ?? "",
       research_summary: payload.research_summary ?? "",
       signal: payload.signal ?? "",
       created_at: now,

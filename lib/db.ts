@@ -41,6 +41,8 @@ async function migrate(db: Client): Promise<void> {
       linkedin_url      TEXT NOT NULL DEFAULT '',
       email             TEXT NOT NULL DEFAULT '',
       generated_message TEXT NOT NULL DEFAULT '',
+      email_subject     TEXT NOT NULL DEFAULT '',
+      email_body        TEXT NOT NULL DEFAULT '',
       research_summary  TEXT NOT NULL DEFAULT '',
       signal            TEXT NOT NULL DEFAULT '',
       status            TEXT NOT NULL DEFAULT 'new',
@@ -58,6 +60,22 @@ async function migrate(db: Client): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_client_linkedin
       ON leads(client_token, linkedin_url) WHERE linkedin_url <> '';
   `);
+
+  // The leads table already exists in production without these two columns.
+  // CREATE TABLE IF NOT EXISTS above is a no-op there, so add them here.
+  // SQLite/libsql has no "ADD COLUMN IF NOT EXISTS", so check first.
+  const cols = await db.execute("PRAGMA table_info(leads)");
+  const existing = new Set(cols.rows.map((r) => String(r.name)));
+  if (!existing.has("email_subject")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN email_subject TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (!existing.has("email_body")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN email_body TEXT NOT NULL DEFAULT ''",
+    );
+  }
 }
 
 // Seed a couple of demo clients + sample leads on first run so the dashboard
@@ -203,11 +221,11 @@ async function seed(db: Client): Promise<void> {
     stmts.push({
       sql: `INSERT INTO leads (
         client_token, name, company, title, linkedin_url, email,
-        generated_message, research_summary, signal, status, comment,
+        generated_message, email_subject, email_body, research_summary, signal, status, comment,
         created_at, updated_at
       ) VALUES (
         $client_token, $name, $company, $title, $linkedin_url, $email,
-        $generated_message, $research_summary, $signal, $status, $comment,
+        $generated_message, '', '', $research_summary, $signal, $status, $comment,
         $created_at, $updated_at
       )`,
       args: { ...r, updated_at: r.created_at },

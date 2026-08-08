@@ -19,6 +19,8 @@ function toPayload(fields: Record<string, unknown>): WebhookPayload {
     linkedin_url: str(fields.linkedin_url),
     email: str(fields.email),
     generated_message: str(fields.generated_message),
+    email_subject: str(fields.email_subject),
+    email_body: str(fields.email_body),
     research_summary: str(fields.research_summary),
     signal: str(fields.signal),
     client_token: str(fields.client_token),
@@ -90,8 +92,9 @@ export async function POST(request: NextRequest) {
   }
 
   // Clay sends rows before they're enriched; skip anything without an actual
-  // outreach message so the board never fills up with empty leads.
-  if (!payload.generated_message?.trim()) {
+  // outreach message (LinkedIn or email) so the board never fills up with
+  // empty leads.
+  if (!payload.generated_message?.trim() && !payload.email_body?.trim()) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
@@ -114,6 +117,6 @@ export async function GET() {
     endpoint: "clay outreach webhook",
     accepts: "application/json or application/x-www-form-urlencoded",
     expects:
-      "POST { name, company, title, linkedin_url, email, generated_message, research_summary, signal, client_token }",
+      "POST { name, company, title, linkedin_url, email, generated_message, email_subject, email_body, research_summary, signal, client_token }",
   });
 }
