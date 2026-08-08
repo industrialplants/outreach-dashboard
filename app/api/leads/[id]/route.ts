@@ -12,6 +12,8 @@ interface PatchBody {
   status?: string;
   comment?: string;
   generated_message?: string;
+  dm_sent_at?: string;
+  email_sent_at?: string;
   token?: string; // caller's board token, used to authorize the change
 }
 
@@ -55,6 +57,8 @@ export async function PATCH(
     status: body.generated_message ? "revised" : (isValidStatus(body.status) ? body.status : undefined),
     comment: body.comment,
     generated_message: body.generated_message,
+    dm_sent_at: body.dm_sent_at,
+    email_sent_at: body.email_sent_at,
   });
 
   return NextResponse.json({ ok: true, lead: updated });

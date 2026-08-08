@@ -236,6 +236,12 @@ code {
   color: var(--muted);
 }
 
+.kpi-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted-2);
+}
+
 /* ---------- Leads ---------- */
 
 .leads {

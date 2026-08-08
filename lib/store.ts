@@ -35,6 +35,8 @@ function mapLead(r: Row): Lead {
     signal: String(r.signal),
     status: String(r.status) as LeadStatus,
     comment: String(r.comment),
+    dm_sent_at: String(r.dm_sent_at),
+    email_sent_at: String(r.email_sent_at),
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
   };
@@ -241,7 +243,13 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
 
 export async function updateLead(
   id: number,
-  changes: { status?: LeadStatus; comment?: string; generated_message?: string },
+  changes: {
+    status?: LeadStatus;
+    comment?: string;
+    generated_message?: string;
+    dm_sent_at?: string;
+    email_sent_at?: string;
+  },
 ): Promise<Lead | undefined> {
   const existing = await getLead(id);
   if (!existing) return undefined;
@@ -251,11 +259,27 @@ export async function updateLead(
     changes.comment !== undefined ? changes.comment : existing.comment;
   const generated_message =
     changes.generated_message !== undefined ? changes.generated_message : existing.generated_message;
+  // Channel-sent timestamps only ever move forward (get set once), so an
+  // update that doesn't mention them must leave the existing value alone.
+  const dm_sent_at =
+    changes.dm_sent_at !== undefined ? changes.dm_sent_at : existing.dm_sent_at;
+  const email_sent_at =
+    changes.email_sent_at !== undefined
+      ? changes.email_sent_at
+      : existing.email_sent_at;
 
   const db = await getDb();
   await db.execute({
-    sql: "UPDATE leads SET status = ?, comment = ?, generated_message = ?, updated_at = ? WHERE id = ?",
-    args: [status, comment, generated_message, new Date().toISOString(), id],
+    sql: "UPDATE leads SET status = ?, comment = ?, generated_message = ?, dm_sent_at = ?, email_sent_at = ?, updated_at = ? WHERE id = ?",
+    args: [
+      status,
+      comment,
+      generated_message,
+      dm_sent_at,
+      email_sent_at,
+      new Date().toISOString(),
+      id,
+    ],
   });
 
   return getLead(id);
@@ -325,6 +349,12 @@ export async function computeKpis(clientToken: string): Promise<Kpis> {
   const outreachesThisWeek = leads.filter(
     (l) => l.status === "sent" && new Date(l.updated_at) >= weekStart,
   ).length;
+  const outreachesThisWeekDm = leads.filter(
+    (l) => l.dm_sent_at && new Date(l.dm_sent_at) >= weekStart,
+  ).length;
+  const outreachesThisWeekEmail = leads.filter(
+    (l) => l.email_sent_at && new Date(l.email_sent_at) >= weekStart,
+  ).length;
 
   // Response rate is measured over leads that actually left the building.
   const sentLike = leads.filter((l) =>
@@ -343,6 +373,8 @@ export async function computeKpis(clientToken: string): Promise<Kpis> {
 
   return {
     outreachesThisWeek,
+    outreachesThisWeekDm,
+    outreachesThisWeekEmail,
     responseRate,
     callsBooked,
     totalLeads: leads.length,
@@ -377,6 +409,8 @@ export async function weeklyReport(
       approved: count("approved"),
       // "sent" in the report means "left the building": sent + replied + calls.
       sent: count("sent") + count("replied") + count("call_booked"),
+      dmSent: bucket.rows.filter((l) => l.dm_sent_at).length,
+      emailSent: bucket.rows.filter((l) => l.email_sent_at).length,
       replied: count("replied") + count("call_booked"),
       callsBooked: count("call_booked"),
     };

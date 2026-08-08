@@ -45,6 +45,8 @@ export interface Lead {
   signal: string;
   status: LeadStatus;
   comment: string;
+  dm_sent_at: string; // ISO 8601, empty string = not yet sent via LinkedIn DM
+  email_sent_at: string; // ISO 8601, empty string = not yet sent via email
   created_at: string; // ISO 8601
   updated_at: string; // ISO 8601
 }
@@ -61,6 +63,8 @@ export interface ClientWithCount extends Client {
 
 export interface Kpis {
   outreachesThisWeek: number;
+  outreachesThisWeekDm: number;
+  outreachesThisWeekEmail: number;
   responseRate: number; // 0..1
   callsBooked: number;
   totalLeads: number;
@@ -73,6 +77,8 @@ export interface WeekReportRow {
   total: number;
   approved: number;
   sent: number;
+  dmSent: number;
+  emailSent: number;
   replied: number;
   callsBooked: number;
 }

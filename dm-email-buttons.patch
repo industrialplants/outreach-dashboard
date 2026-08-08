@@ -1,0 +1,345 @@
+diff --git a/app/api/leads/[id]/route.ts b/app/api/leads/[id]/route.ts
+index a434884..ef8bbd6 100644
+--- a/app/api/leads/[id]/route.ts
++++ b/app/api/leads/[id]/route.ts
+@@ -12,6 +12,8 @@ interface PatchBody {
+   status?: string;
+   comment?: string;
+   generated_message?: string;
++  dm_sent_at?: string;
++  email_sent_at?: string;
+   token?: string; // caller's board token, used to authorize the change
+ }
+ 
+@@ -55,6 +57,8 @@ export async function PATCH(
+     status: body.generated_message ? "revised" : (isValidStatus(body.status) ? body.status : undefined),
+     comment: body.comment,
+     generated_message: body.generated_message,
++    dm_sent_at: body.dm_sent_at,
++    email_sent_at: body.email_sent_at,
+   });
+ 
+   return NextResponse.json({ ok: true, lead: updated });
+diff --git a/app/api/webhook/route.ts b/app/api/webhook/route.ts
+index a113e91..55f4dca 100644
+--- a/app/api/webhook/route.ts
++++ b/app/api/webhook/route.ts
+@@ -80,8 +80,16 @@ export async function POST(request: NextRequest) {
+ 
+   // Debug: check whether Clay actually sends a "title" and what it looks like.
+   console.log("[webhook] incoming title:", JSON.stringify(fields.title));
+-  console.log("[webhook] incoming email_subject:", JSON.stringify(fields.email_subject));
+-  console.log("[webhook] incoming email_body:", JSON.stringify(fields.email_body));
++  // Temporary debug: confirm whether Clay is sending email_subject/email_body
++  // at all, and what they contain. Remove once the email display is confirmed working.
++  console.log(
++    "[webhook] incoming email_subject:",
++    JSON.stringify(fields.email_subject),
++  );
++  console.log(
++    "[webhook] incoming email_body:",
++    JSON.stringify(fields.email_body),
++  );
+   console.log("[webhook] all incoming keys:", JSON.stringify(Object.keys(fields)));
+ 
+   const payload = toPayload(fields);
+diff --git a/app/components/Dashboard.tsx b/app/components/Dashboard.tsx
+index 7a8c04b..33f7474 100644
+--- a/app/components/Dashboard.tsx
++++ b/app/components/Dashboard.tsx
+@@ -77,7 +77,13 @@ export default function Dashboard({
+ 
+   async function mutate(
+     id: number,
+-    changes: { status?: LeadStatus; comment?: string; generated_message?: string },
++    changes: {
++      status?: LeadStatus;
++      comment?: string;
++      generated_message?: string;
++      dm_sent_at?: string;
++      email_sent_at?: string;
++    },
+   ) {
+     const res = await fetch(`/api/leads/${id}`, {
+       method: "PATCH",
+@@ -216,7 +222,11 @@ export default function Dashboard({
+ 
+ function KpiRow({ kpis }: { kpis: Kpis }) {
+   const cards = [
+-    { label: "Outreaches diese Woche", value: String(kpis.outreachesThisWeek) },
++    {
++      label: "Outreaches diese Woche",
++      value: String(kpis.outreachesThisWeek),
++      sub: `${kpis.outreachesThisWeekDm} DM · ${kpis.outreachesThisWeekEmail} E-Mail`,
++    },
+     {
+       label: "Antwortrate",
+       value: `${Math.round(kpis.responseRate * 100)}%`,
+@@ -230,6 +240,7 @@ function KpiRow({ kpis }: { kpis: Kpis }) {
+         <div className="kpi" key={c.label}>
+           <div className="kpi-value">{c.value}</div>
+           <div className="kpi-label">{c.label}</div>
++          {c.sub && <div className="kpi-sub">{c.sub}</div>}
+         </div>
+       ))}
+     </section>
+@@ -245,7 +256,13 @@ function LeadList({
+   leads: Lead[];
+   onMutate: (
+     id: number,
+-    changes: { status?: LeadStatus; comment?: string; generated_message?: string },
++    changes: {
++      status?: LeadStatus;
++      comment?: string;
++      generated_message?: string;
++      dm_sent_at?: string;
++      email_sent_at?: string;
++    },
+   ) => void;
+   onDelete?: (id: number) => void;
+   filtered?: boolean;
+@@ -288,7 +305,13 @@ function LeadCard({
+   lead: Lead;
+   onMutate: (
+     id: number,
+-    changes: { status?: LeadStatus; comment?: string; generated_message?: string },
++    changes: {
++      status?: LeadStatus;
++      comment?: string;
++      generated_message?: string;
++      dm_sent_at?: string;
++      email_sent_at?: string;
++    },
+   ) => void;
+   onDelete?: (id: number) => void;
+ }) {
+@@ -346,14 +369,36 @@ function LeadCard({
+         >
+           Ablehnen
+         </button>
+-        {lead.status === "approved" && (
+-          <button
+-            className="btn sent"
+-            onClick={() => onMutate(lead.id, { status: "sent" })}
+-          >
+-            Gesendet
+-          </button>
+-        )}
++        {lead.status !== "new" &&
++          lead.status !== "revised" &&
++          lead.status !== "rejected" && (
++            <>
++              <button
++                className="btn sent"
++                onClick={() =>
++                  onMutate(lead.id, {
++                    status: "sent",
++                    dm_sent_at: new Date().toISOString(),
++                  })
++                }
++                disabled={!!lead.dm_sent_at}
++              >
++                {lead.dm_sent_at ? "✓ DM gesendet" : "DM gesendet"}
++              </button>
++              <button
++                className="btn sent"
++                onClick={() =>
++                  onMutate(lead.id, {
++                    status: "sent",
++                    email_sent_at: new Date().toISOString(),
++                  })
++                }
++                disabled={!!lead.email_sent_at}
++              >
++                {lead.email_sent_at ? "✓ E-Mail gesendet" : "E-Mail gesendet"}
++              </button>
++            </>
++          )}
+         <button className="btn ghost" onClick={() => setShowComment((v) => !v)}>
+           Kommentar
+         </button>
+@@ -495,6 +540,8 @@ function ReportTable({ report }: { report: WeekReportRow[] }) {
+             <th>Leads</th>
+             <th>Freigegeben</th>
+             <th>Gesendet</th>
++            <th>davon DM</th>
++            <th>davon E-Mail</th>
+             <th>Antworten</th>
+             <th>Calls</th>
+             <th>Antwortrate</th>
+@@ -513,6 +560,8 @@ function ReportTable({ report }: { report: WeekReportRow[] }) {
+                 <td>{row.total}</td>
+                 <td>{row.approved}</td>
+                 <td>{row.sent}</td>
++                <td>{row.dmSent}</td>
++                <td>{row.emailSent}</td>
+                 <td>{row.replied}</td>
+                 <td>{row.callsBooked}</td>
+                 <td>{rate}%</td>
+diff --git a/app/globals.css b/app/globals.css
+index 4f3e7dc..60e92a3 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -236,6 +236,12 @@ code {
+   color: var(--muted);
+ }
+ 
++.kpi-sub {
++  margin-top: 2px;
++  font-size: 11px;
++  color: var(--muted-2);
++}
++
+ /* ---------- Leads ---------- */
+ 
+ .leads {
+diff --git a/lib/db.ts b/lib/db.ts
+index b15c610..8c9c6f1 100644
+--- a/lib/db.ts
++++ b/lib/db.ts
+@@ -47,6 +47,8 @@ async function migrate(db: Client): Promise<void> {
+       signal            TEXT NOT NULL DEFAULT '',
+       status            TEXT NOT NULL DEFAULT 'new',
+       comment           TEXT NOT NULL DEFAULT '',
++      dm_sent_at        TEXT NOT NULL DEFAULT '',
++      email_sent_at     TEXT NOT NULL DEFAULT '',
+       created_at        TEXT NOT NULL,
+       updated_at        TEXT NOT NULL,
+       FOREIGN KEY (client_token) REFERENCES clients(token)
+@@ -76,6 +78,16 @@ async function migrate(db: Client): Promise<void> {
+       "ALTER TABLE leads ADD COLUMN email_body TEXT NOT NULL DEFAULT ''",
+     );
+   }
++  if (!existing.has("dm_sent_at")) {
++    await db.execute(
++      "ALTER TABLE leads ADD COLUMN dm_sent_at TEXT NOT NULL DEFAULT ''",
++    );
++  }
++  if (!existing.has("email_sent_at")) {
++    await db.execute(
++      "ALTER TABLE leads ADD COLUMN email_sent_at TEXT NOT NULL DEFAULT ''",
++    );
++  }
+ }
+ 
+ // Seed a couple of demo clients + sample leads on first run so the dashboard
+diff --git a/lib/store.ts b/lib/store.ts
+index f0fcb76..0da2131 100644
+--- a/lib/store.ts
++++ b/lib/store.ts
+@@ -35,6 +35,8 @@ function mapLead(r: Row): Lead {
+     signal: String(r.signal),
+     status: String(r.status) as LeadStatus,
+     comment: String(r.comment),
++    dm_sent_at: String(r.dm_sent_at),
++    email_sent_at: String(r.email_sent_at),
+     created_at: String(r.created_at),
+     updated_at: String(r.updated_at),
+   };
+@@ -241,7 +243,13 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
+ 
+ export async function updateLead(
+   id: number,
+-  changes: { status?: LeadStatus; comment?: string; generated_message?: string },
++  changes: {
++    status?: LeadStatus;
++    comment?: string;
++    generated_message?: string;
++    dm_sent_at?: string;
++    email_sent_at?: string;
++  },
+ ): Promise<Lead | undefined> {
+   const existing = await getLead(id);
+   if (!existing) return undefined;
+@@ -251,11 +259,27 @@ export async function updateLead(
+     changes.comment !== undefined ? changes.comment : existing.comment;
+   const generated_message =
+     changes.generated_message !== undefined ? changes.generated_message : existing.generated_message;
++  // Channel-sent timestamps only ever move forward (get set once), so an
++  // update that doesn't mention them must leave the existing value alone.
++  const dm_sent_at =
++    changes.dm_sent_at !== undefined ? changes.dm_sent_at : existing.dm_sent_at;
++  const email_sent_at =
++    changes.email_sent_at !== undefined
++      ? changes.email_sent_at
++      : existing.email_sent_at;
+ 
+   const db = await getDb();
+   await db.execute({
+-    sql: "UPDATE leads SET status = ?, comment = ?, generated_message = ?, updated_at = ? WHERE id = ?",
+-    args: [status, comment, generated_message, new Date().toISOString(), id],
++    sql: "UPDATE leads SET status = ?, comment = ?, generated_message = ?, dm_sent_at = ?, email_sent_at = ?, updated_at = ? WHERE id = ?",
++    args: [
++      status,
++      comment,
++      generated_message,
++      dm_sent_at,
++      email_sent_at,
++      new Date().toISOString(),
++      id,
++    ],
+   });
+ 
+   return getLead(id);
+@@ -325,6 +349,12 @@ export async function computeKpis(clientToken: string): Promise<Kpis> {
+   const outreachesThisWeek = leads.filter(
+     (l) => l.status === "sent" && new Date(l.updated_at) >= weekStart,
+   ).length;
++  const outreachesThisWeekDm = leads.filter(
++    (l) => l.dm_sent_at && new Date(l.dm_sent_at) >= weekStart,
++  ).length;
++  const outreachesThisWeekEmail = leads.filter(
++    (l) => l.email_sent_at && new Date(l.email_sent_at) >= weekStart,
++  ).length;
+ 
+   // Response rate is measured over leads that actually left the building.
+   const sentLike = leads.filter((l) =>
+@@ -343,6 +373,8 @@ export async function computeKpis(clientToken: string): Promise<Kpis> {
+ 
+   return {
+     outreachesThisWeek,
++    outreachesThisWeekDm,
++    outreachesThisWeekEmail,
+     responseRate,
+     callsBooked,
+     totalLeads: leads.length,
+@@ -377,6 +409,8 @@ export async function weeklyReport(
+       approved: count("approved"),
+       // "sent" in the report means "left the building": sent + replied + calls.
+       sent: count("sent") + count("replied") + count("call_booked"),
++      dmSent: bucket.rows.filter((l) => l.dm_sent_at).length,
++      emailSent: bucket.rows.filter((l) => l.email_sent_at).length,
+       replied: count("replied") + count("call_booked"),
+       callsBooked: count("call_booked"),
+     };
+diff --git a/lib/types.ts b/lib/types.ts
+index 8ba5e9e..78a6b00 100644
+--- a/lib/types.ts
++++ b/lib/types.ts
+@@ -45,6 +45,8 @@ export interface Lead {
+   signal: string;
+   status: LeadStatus;
+   comment: string;
++  dm_sent_at: string; // ISO 8601, empty string = not yet sent via LinkedIn DM
++  email_sent_at: string; // ISO 8601, empty string = not yet sent via email
+   created_at: string; // ISO 8601
+   updated_at: string; // ISO 8601
+ }
+@@ -61,6 +63,8 @@ export interface ClientWithCount extends Client {
+ 
+ export interface Kpis {
+   outreachesThisWeek: number;
++  outreachesThisWeekDm: number;
++  outreachesThisWeekEmail: number;
+   responseRate: number; // 0..1
+   callsBooked: number;
+   totalLeads: number;
+@@ -73,6 +77,8 @@ export interface WeekReportRow {
+   total: number;
+   approved: number;
+   sent: number;
++  dmSent: number;
++  emailSent: number;
+   replied: number;
+   callsBooked: number;
+ }

@@ -47,6 +47,8 @@ async function migrate(db: Client): Promise<void> {
       signal            TEXT NOT NULL DEFAULT '',
       status            TEXT NOT NULL DEFAULT 'new',
       comment           TEXT NOT NULL DEFAULT '',
+      dm_sent_at        TEXT NOT NULL DEFAULT '',
+      email_sent_at     TEXT NOT NULL DEFAULT '',
       created_at        TEXT NOT NULL,
       updated_at        TEXT NOT NULL,
       FOREIGN KEY (client_token) REFERENCES clients(token)
@@ -74,6 +76,16 @@ async function migrate(db: Client): Promise<void> {
   if (!existing.has("email_body")) {
     await db.execute(
       "ALTER TABLE leads ADD COLUMN email_body TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (!existing.has("dm_sent_at")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN dm_sent_at TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (!existing.has("email_sent_at")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN email_sent_at TEXT NOT NULL DEFAULT ''",
     );
   }
 }

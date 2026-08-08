@@ -77,7 +77,13 @@ export default function Dashboard({
 
   async function mutate(
     id: number,
-    changes: { status?: LeadStatus; comment?: string; generated_message?: string },
+    changes: {
+      status?: LeadStatus;
+      comment?: string;
+      generated_message?: string;
+      dm_sent_at?: string;
+      email_sent_at?: string;
+    },
   ) {
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
@@ -216,7 +222,11 @@ export default function Dashboard({
 
 function KpiRow({ kpis }: { kpis: Kpis }) {
   const cards = [
-    { label: "Outreaches diese Woche", value: String(kpis.outreachesThisWeek) },
+    {
+      label: "Outreaches diese Woche",
+      value: String(kpis.outreachesThisWeek),
+      sub: `${kpis.outreachesThisWeekDm} DM · ${kpis.outreachesThisWeekEmail} E-Mail`,
+    },
     {
       label: "Antwortrate",
       value: `${Math.round(kpis.responseRate * 100)}%`,
@@ -230,6 +240,7 @@ function KpiRow({ kpis }: { kpis: Kpis }) {
         <div className="kpi" key={c.label}>
           <div className="kpi-value">{c.value}</div>
           <div className="kpi-label">{c.label}</div>
+          {c.sub && <div className="kpi-sub">{c.sub}</div>}
         </div>
       ))}
     </section>
@@ -245,7 +256,13 @@ function LeadList({
   leads: Lead[];
   onMutate: (
     id: number,
-    changes: { status?: LeadStatus; comment?: string; generated_message?: string },
+    changes: {
+      status?: LeadStatus;
+      comment?: string;
+      generated_message?: string;
+      dm_sent_at?: string;
+      email_sent_at?: string;
+    },
   ) => void;
   onDelete?: (id: number) => void;
   filtered?: boolean;
@@ -288,7 +305,13 @@ function LeadCard({
   lead: Lead;
   onMutate: (
     id: number,
-    changes: { status?: LeadStatus; comment?: string; generated_message?: string },
+    changes: {
+      status?: LeadStatus;
+      comment?: string;
+      generated_message?: string;
+      dm_sent_at?: string;
+      email_sent_at?: string;
+    },
   ) => void;
   onDelete?: (id: number) => void;
 }) {
@@ -346,14 +369,36 @@ function LeadCard({
         >
           Ablehnen
         </button>
-        {lead.status === "approved" && (
-          <button
-            className="btn sent"
-            onClick={() => onMutate(lead.id, { status: "sent" })}
-          >
-            Gesendet
-          </button>
-        )}
+        {lead.status !== "new" &&
+          lead.status !== "revised" &&
+          lead.status !== "rejected" && (
+            <>
+              <button
+                className="btn sent"
+                onClick={() =>
+                  onMutate(lead.id, {
+                    status: "sent",
+                    dm_sent_at: new Date().toISOString(),
+                  })
+                }
+                disabled={!!lead.dm_sent_at}
+              >
+                {lead.dm_sent_at ? "✓ DM gesendet" : "DM gesendet"}
+              </button>
+              <button
+                className="btn sent"
+                onClick={() =>
+                  onMutate(lead.id, {
+                    status: "sent",
+                    email_sent_at: new Date().toISOString(),
+                  })
+                }
+                disabled={!!lead.email_sent_at}
+              >
+                {lead.email_sent_at ? "✓ E-Mail gesendet" : "E-Mail gesendet"}
+              </button>
+            </>
+          )}
         <button className="btn ghost" onClick={() => setShowComment((v) => !v)}>
           Kommentar
         </button>
@@ -495,6 +540,8 @@ function ReportTable({ report }: { report: WeekReportRow[] }) {
             <th>Leads</th>
             <th>Freigegeben</th>
             <th>Gesendet</th>
+            <th>davon DM</th>
+            <th>davon E-Mail</th>
             <th>Antworten</th>
             <th>Calls</th>
             <th>Antwortrate</th>
@@ -513,6 +560,8 @@ function ReportTable({ report }: { report: WeekReportRow[] }) {
                 <td>{row.total}</td>
                 <td>{row.approved}</td>
                 <td>{row.sent}</td>
+                <td>{row.dmSent}</td>
+                <td>{row.emailSent}</td>
                 <td>{row.replied}</td>
                 <td>{row.callsBooked}</td>
                 <td>{rate}%</td>
