@@ -1,5 +1,6 @@
 import type { Row } from "@libsql/client";
 import { getDb } from "./db";
+import { hashPassword, verifyPassword } from "./auth";
 import type {
   Client,
   ClientWithCount,
@@ -16,7 +17,14 @@ import { STATUS_ORDER } from "./types";
 // typed, JSON-serializable objects before they leave this module.
 
 function mapClient(r: Row): Client {
-  return { token: String(r.token), name: String(r.name) };
+  const username = String(r.username ?? "");
+  const passwordHash = String(r.password_hash ?? "");
+  return {
+    token: String(r.token),
+    name: String(r.name),
+    username,
+    hasLogin: username !== "" && passwordHash !== "",
+  };
 }
 
 function mapLead(r: Row): Lead {
@@ -37,6 +45,10 @@ function mapLead(r: Row): Lead {
     comment: String(r.comment),
     dm_sent_at: String(r.dm_sent_at),
     email_sent_at: String(r.email_sent_at),
+    generated_message_original: String(r.generated_message_original),
+    email_subject_original: String(r.email_subject_original),
+    email_body_original: String(r.email_body_original),
+    pending_edit_fields: String(r.pending_edit_fields),
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
   };
@@ -46,14 +58,14 @@ function mapLead(r: Row): Lead {
 
 export async function listClients(): Promise<Client[]> {
   const db = await getDb();
-  const rs = await db.execute("SELECT token, name FROM clients ORDER BY name");
+  const rs = await db.execute("SELECT * FROM clients ORDER BY name");
   return rs.rows.map(mapClient);
 }
 
 export async function getClient(token: string): Promise<Client | undefined> {
   const db = await getDb();
   const rs = await db.execute({
-    sql: "SELECT token, name FROM clients WHERE token = ?",
+    sql: "SELECT * FROM clients WHERE token = ?",
     args: [token],
   });
   return rs.rows[0] ? mapClient(rs.rows[0]) : undefined;
@@ -63,32 +75,102 @@ export async function getClient(token: string): Promise<Client | undefined> {
 export async function listClientsWithCounts(): Promise<ClientWithCount[]> {
   const db = await getDb();
   const rs = await db.execute(
-    `SELECT c.token AS token, c.name AS name,
+    `SELECT c.token AS token, c.name AS name, c.username AS username,
+            c.password_hash AS password_hash,
             COUNT(l.id) AS leadCount
        FROM clients c
        LEFT JOIN leads l ON l.client_token = c.token
-      GROUP BY c.token, c.name
+      GROUP BY c.token, c.name, c.username, c.password_hash
       ORDER BY c.name`,
   );
   return rs.rows.map((r) => ({
-    token: String(r.token),
-    name: String(r.name),
+    ...mapClient(r),
     leadCount: Number(r.leadCount),
   }));
 }
 
 // Create a new client. Returns undefined if the token is already taken.
+// Optionally sets up a login (username + plaintext password, hashed here) in
+// the same step — used by the "Kunde anlegen" form in the admin Kunden tab.
 export async function createClient(
   token: string,
   name: string,
-): Promise<Client | undefined> {
+  username?: string,
+  passwordPlain?: string,
+): Promise<Client | { error: string } | undefined> {
   if (await getClient(token)) return undefined;
   const db = await getDb();
+  const cleanUsername = username?.trim() ?? "";
+  const passwordHash = passwordPlain ? hashPassword(passwordPlain) : "";
+  if (cleanUsername) {
+    const existing = await findClientByUsername(cleanUsername);
+    if (existing) return { error: "Dieser Benutzername ist bereits vergeben." };
+  }
   await db.execute({
-    sql: "INSERT INTO clients (token, name) VALUES (?, ?)",
-    args: [token, name],
+    sql: "INSERT INTO clients (token, name, username, password_hash) VALUES (?, ?, ?, ?)",
+    args: [token, name, cleanUsername, passwordHash],
   });
-  return { token, name };
+  return {
+    token,
+    name,
+    username: cleanUsername,
+    hasLogin: cleanUsername !== "" && passwordHash !== "",
+  };
+}
+
+// Set or change a client's login. Empty username clears the login entirely.
+export async function updateClientCredentials(
+  token: string,
+  username: string,
+  passwordPlain: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const client = await getClient(token);
+  if (!client) return { ok: false, error: "Kunde nicht gefunden." };
+
+  const cleanUsername = username.trim();
+  if (!cleanUsername || !passwordPlain) {
+    return { ok: false, error: "Benutzername und Passwort sind erforderlich." };
+  }
+  const existing = await findClientByUsername(cleanUsername);
+  if (existing && existing.token !== token) {
+    return { ok: false, error: "Dieser Benutzername ist bereits vergeben." };
+  }
+
+  const db = await getDb();
+  await db.execute({
+    sql: "UPDATE clients SET username = ?, password_hash = ? WHERE token = ?",
+    args: [cleanUsername, hashPassword(passwordPlain), token],
+  });
+  return { ok: true };
+}
+
+// Internal: raw lookup by username, used for login + uniqueness checks. Not
+// exported as-is because the row still carries the password hash.
+async function findClientByUsername(
+  username: string,
+): Promise<{ token: string; passwordHash: string } | undefined> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: "SELECT token, password_hash FROM clients WHERE username = ?",
+    args: [username],
+  });
+  const row = rs.rows[0];
+  if (!row) return undefined;
+  return { token: String(row.token), passwordHash: String(row.password_hash) };
+}
+
+// Verifies a client login attempt. Returns the Client on success, undefined
+// on any failure (unknown username, wrong password, or no login configured).
+export async function verifyClientLogin(
+  username: string,
+  password: string,
+): Promise<Client | undefined> {
+  const cleanUsername = username.trim();
+  if (!cleanUsername || !password) return undefined;
+  const found = await findClientByUsername(cleanUsername);
+  if (!found || !found.passwordHash) return undefined;
+  if (!verifyPassword(password, found.passwordHash)) return undefined;
+  return getClient(found.token);
 }
 
 // Delete a client together with all of its leads. Returns false if unknown.
@@ -119,7 +201,7 @@ export async function ensureClient(
     sql: "INSERT INTO clients (token, name) VALUES (?, ?)",
     args: [token, name],
   });
-  return { token, name };
+  return { token, name, username: "", hasLogin: false };
 }
 
 // ---------- Leads ----------
@@ -241,14 +323,38 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
   return mapLead(rs.rows[0]);
 }
 
+// Fields that support the customer-edit tracking (snapshot + diff) described
+// above. Kept as a const tuple so TypeScript can narrow over it.
+const TRACKED_FIELDS = ["generated_message", "email_subject", "email_body"] as const;
+type TrackedField = (typeof TRACKED_FIELDS)[number];
+
+function parsePending(value: string): Set<TrackedField> {
+  return new Set(
+    value.split(",").filter((f): f is TrackedField =>
+      TRACKED_FIELDS.includes(f as TrackedField),
+    ),
+  );
+}
+
 export async function updateLead(
   id: number,
   changes: {
     status?: LeadStatus;
     comment?: string;
     generated_message?: string;
+    email_subject?: string;
+    email_body?: string;
     dm_sent_at?: string;
     email_sent_at?: string;
+    // Whether this update comes from the agency admin or from the client
+    // themself — decides whether an edit is tracked as a pending customer
+    // change (client) or treated as final/reviewed (admin).
+    isAdminEdit?: boolean;
+    // Admin-only actions on fields that currently have a pending customer
+    // edit: keep the customer's text but clear the "needs review" marker, or
+    // throw it away and restore the AI-generated original.
+    acceptFields?: string[];
+    revertFields?: string[];
   },
 ): Promise<Lead | undefined> {
   const existing = await getLead(id);
@@ -257,10 +363,6 @@ export async function updateLead(
   const status = changes.status ?? existing.status;
   const comment =
     changes.comment !== undefined ? changes.comment : existing.comment;
-  const generated_message =
-    changes.generated_message !== undefined ? changes.generated_message : existing.generated_message;
-  // Channel-sent timestamps only ever move forward (get set once), so an
-  // update that doesn't mention them must leave the existing value alone.
   const dm_sent_at =
     changes.dm_sent_at !== undefined ? changes.dm_sent_at : existing.dm_sent_at;
   const email_sent_at =
@@ -268,13 +370,74 @@ export async function updateLead(
       ? changes.email_sent_at
       : existing.email_sent_at;
 
+  const pending = parsePending(existing.pending_edit_fields);
+  const accept = new Set(changes.acceptFields ?? []);
+  const revert = new Set(changes.revertFields ?? []);
+
+  // Working copies of the three tracked text fields + their baselines.
+  const current: Record<TrackedField, string> = {
+    generated_message: existing.generated_message,
+    email_subject: existing.email_subject,
+    email_body: existing.email_body,
+  };
+  const original: Record<TrackedField, string> = {
+    generated_message: existing.generated_message_original,
+    email_subject: existing.email_subject_original,
+    email_body: existing.email_body_original,
+  };
+
+  for (const field of TRACKED_FIELDS) {
+    if (revert.has(field) && pending.has(field)) {
+      current[field] = original[field];
+      original[field] = "";
+      pending.delete(field);
+      continue;
+    }
+    if (accept.has(field) && pending.has(field)) {
+      original[field] = "";
+      pending.delete(field);
+      continue;
+    }
+    const incoming = changes[field];
+    if (incoming === undefined || incoming === current[field]) continue;
+
+    if (changes.isAdminEdit) {
+      // The admin's edit is the new source of truth — no diff needed.
+      current[field] = incoming;
+      original[field] = "";
+      pending.delete(field);
+    } else {
+      // A client edit: capture the pre-edit baseline the first time only, so
+      // repeated edits before admin review still diff against the original
+      // AI-generated text, not an intermediate customer draft.
+      if (!pending.has(field)) {
+        original[field] = current[field];
+        pending.add(field);
+      }
+      current[field] = incoming;
+    }
+  }
+
   const db = await getDb();
   await db.execute({
-    sql: "UPDATE leads SET status = ?, comment = ?, generated_message = ?, dm_sent_at = ?, email_sent_at = ?, updated_at = ? WHERE id = ?",
+    sql: `UPDATE leads SET
+            status = ?, comment = ?,
+            generated_message = ?, email_subject = ?, email_body = ?,
+            generated_message_original = ?, email_subject_original = ?, email_body_original = ?,
+            pending_edit_fields = ?,
+            dm_sent_at = ?, email_sent_at = ?,
+            updated_at = ?
+          WHERE id = ?`,
     args: [
       status,
       comment,
-      generated_message,
+      current.generated_message,
+      current.email_subject,
+      current.email_body,
+      original.generated_message,
+      original.email_subject,
+      original.email_body,
+      [...pending].join(","),
       dm_sent_at,
       email_sent_at,
       new Date().toISOString(),

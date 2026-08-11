@@ -4,6 +4,7 @@ import {
   createClient,
   deleteClient,
   listClientsWithCounts,
+  updateClientCredentials,
 } from "@/lib/store";
 import { ADMIN_TOKEN } from "@/lib/db";
 
@@ -25,10 +26,12 @@ export async function GET(request: NextRequest) {
 interface ClientBody {
   name?: string;
   token?: string; // the new client's board token
+  username?: string;
+  password?: string;
   adminToken?: string; // proves the caller is the admin
 }
 
-// POST /api/clients — create a new client { name, token, adminToken }.
+// POST /api/clients — create a new client { name, token, adminToken, username?, password? }.
 export async function POST(request: Request) {
   let body: ClientBody;
   try {
@@ -57,15 +60,46 @@ export async function POST(request: Request) {
     );
   }
 
-  const client = await createClient(token, name);
-  if (!client) {
+  const result = await createClient(token, name, body.username, body.password);
+  if (!result) {
     return NextResponse.json(
       { error: "Dieser Token ist bereits vergeben." },
       { status: 409 },
     );
   }
+  if ("error" in result) {
+    return NextResponse.json({ error: result.error }, { status: 409 });
+  }
 
-  return NextResponse.json({ ok: true, client }, { status: 201 });
+  return NextResponse.json({ ok: true, client: result }, { status: 201 });
+}
+
+// PATCH /api/clients — set or change a client's login { token, adminToken, username, password }.
+export async function PATCH(request: Request) {
+  let body: ClientBody;
+  try {
+    body = (await request.json()) as ClientBody;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!isAdmin(body.adminToken)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const token = body.token?.trim();
+  if (!token || !body.username || !body.password) {
+    return NextResponse.json(
+      { error: "token, username and password are required" },
+      { status: 400 },
+    );
+  }
+
+  const result = await updateClientCredentials(token, body.username, body.password);
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: 409 });
+  }
+  return NextResponse.json({ ok: true });
 }
 
 // DELETE /api/clients — remove a client and its leads { token, adminToken }.

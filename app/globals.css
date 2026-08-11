@@ -502,11 +502,12 @@ code {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
 }
 
 .report table {
   width: 100%;
+  min-width: 760px;
   border-collapse: collapse;
   font-size: 14px;
 }
@@ -520,6 +521,7 @@ code {
   color: var(--muted);
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 
 .report td {
@@ -723,6 +725,68 @@ code {
   margin-top: 20px;
   font-size: 13px;
   color: var(--muted);
+}
+
+.login-form {
+  margin-top: 24px;
+}
+
+/* ---------- Customer-edit diff ---------- */
+
+.message.diff,
+.email-subject.diff {
+  border-left: 3px solid var(--accent);
+}
+
+.message del,
+.email-subject del {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--red);
+}
+
+.message ins,
+.email-subject ins {
+  color: var(--text);
+  text-decoration: none;
+  background: rgba(255, 14, 78, 0.16);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.diff-note {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted-2);
+}
+
+.diff-note-admin {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ---------- Per-client login editor (Kunden tab) ---------- */
+
+.creds-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+}
+.creds-editor input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.creds-editor-actions {
+  display: flex;
+  gap: 6px;
 }
 
 /* ---------- Responsive ---------- */

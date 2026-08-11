@@ -12,6 +12,7 @@ import type {
   WeekReportRow,
 } from "@/lib/types";
 import { STATUS_LABELS, STATUS_ORDER } from "@/lib/types";
+import { wordDiff } from "@/lib/diff";
 
 interface DashboardProps {
   role: "admin" | "client";
@@ -81,6 +82,10 @@ export default function Dashboard({
       status?: LeadStatus;
       comment?: string;
       generated_message?: string;
+      email_subject?: string;
+      email_body?: string;
+      accept_fields?: string[];
+      revert_fields?: string[];
       dm_sent_at?: string;
       email_sent_at?: string;
     },
@@ -148,7 +153,19 @@ export default function Dashboard({
               </select>
             </label>
           ) : (
-            <span className="client-name">{selected?.name}</span>
+            <>
+              <span className="client-name">{selected?.name}</span>
+              <button
+                className="btn ghost small"
+                onClick={async () => {
+                  await fetch("/api/logout", { method: "POST" });
+                  router.push("/");
+                  router.refresh();
+                }}
+              >
+                Abmelden
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -210,6 +227,7 @@ export default function Dashboard({
             leads={leads.filter((l) => matchesFilter(l, leadFilter))}
             onMutate={mutate}
             onDelete={role === "admin" ? removeLead : undefined}
+            isAdmin={role === "admin"}
             filtered={leadFilter !== "all"}
           />
         </>
@@ -251,6 +269,7 @@ function LeadList({
   leads,
   onMutate,
   onDelete,
+  isAdmin,
   filtered = false,
 }: {
   leads: Lead[];
@@ -260,11 +279,16 @@ function LeadList({
       status?: LeadStatus;
       comment?: string;
       generated_message?: string;
+      email_subject?: string;
+      email_body?: string;
+      accept_fields?: string[];
+      revert_fields?: string[];
       dm_sent_at?: string;
       email_sent_at?: string;
     },
   ) => void;
   onDelete?: (id: number) => void;
+  isAdmin: boolean;
   filtered?: boolean;
 }) {
   if (leads.length === 0) {
@@ -291,9 +315,77 @@ function LeadList({
           lead={lead}
           onMutate={onMutate}
           onDelete={onDelete}
+          isAdmin={isAdmin}
         />
       ))}
     </section>
+  );
+}
+
+// Renders text as-is, or — when a customer edit is pending review — as a
+// Google-Docs-style diff: old wording struck through, new wording inserted.
+function DiffField({
+  current,
+  original,
+  isPending,
+}: {
+  current: string;
+  original: string;
+  isPending: boolean;
+}) {
+  if (!isPending) return <>{current || "—"}</>;
+  const parts = wordDiff(original, current);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.type === "same") return <span key={i}>{part.text}</span>;
+        if (part.type === "del") return <del key={i}>{part.text}</del>;
+        return <ins key={i}>{part.text}</ins>;
+      })}
+    </>
+  );
+}
+
+// Shown under a field that has an unreviewed customer edit. Clients just see
+// a note; admins get the review actions (keep the new wording, or throw it
+// away and restore what the AI originally generated).
+function PendingEditNote({
+  fieldKey,
+  isAdmin,
+  onMutate,
+  leadId,
+}: {
+  fieldKey: string;
+  isAdmin: boolean;
+  onMutate: (
+    id: number,
+    changes: { accept_fields?: string[]; revert_fields?: string[] },
+  ) => void;
+  leadId: number;
+}) {
+  if (!isAdmin) {
+    return (
+      <div className="diff-note">
+        ✏️ Von dir bearbeitet — dein industrial-plants-Team schaut nochmal drüber.
+      </div>
+    );
+  }
+  return (
+    <div className="diff-note diff-note-admin">
+      <span>✏️ Vom Kunden bearbeitet</span>
+      <button
+        className="btn small"
+        onClick={() => onMutate(leadId, { accept_fields: [fieldKey] })}
+      >
+        Übernehmen
+      </button>
+      <button
+        className="btn ghost small"
+        onClick={() => onMutate(leadId, { revert_fields: [fieldKey] })}
+      >
+        Original wiederherstellen
+      </button>
+    </div>
   );
 }
 
@@ -301,6 +393,7 @@ function LeadCard({
   lead,
   onMutate,
   onDelete,
+  isAdmin,
 }: {
   lead: Lead;
   onMutate: (
@@ -309,17 +402,28 @@ function LeadCard({
       status?: LeadStatus;
       comment?: string;
       generated_message?: string;
+      email_subject?: string;
+      email_body?: string;
+      accept_fields?: string[];
+      revert_fields?: string[];
       dm_sent_at?: string;
       email_sent_at?: string;
     },
   ) => void;
   onDelete?: (id: number) => void;
+  isAdmin: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [showComment, setShowComment] = useState(false);
   const [comment, setComment] = useState(lead.comment);
   const [isEditing, setIsEditing] = useState(false);
   const [editMessage, setEditMessage] = useState(lead.generated_message || "");
+  const [editSubject, setEditSubject] = useState(lead.email_subject || "");
+  const [editBody, setEditBody] = useState(lead.email_body || "");
+
+  const pendingFields = new Set(
+    lead.pending_edit_fields ? lead.pending_edit_fields.split(",") : [],
+  );
 
   return (
     <article className="lead">
@@ -410,6 +514,8 @@ function LeadCard({
           onClick={() => {
             setIsEditing(true);
             setEditMessage(lead.generated_message || "");
+            setEditSubject(lead.email_subject || "");
+            setEditBody(lead.email_body || "");
           }}
         >
           Bearbeiten
@@ -427,18 +533,53 @@ function LeadCard({
       </div>
 
       {isEditing && (
-          <div className="comment-box">
-            <textarea
-              value={editMessage}
-              onChange={(e) => setEditMessage(e.target.value)}
-              rows={5}
-              style={{ width: "100%", resize: "vertical" }}
-            />
+          <div className="comment-box edit-box">
+            <label className="field">
+              <span>LinkedIn-Nachricht</span>
+              <textarea
+                value={editMessage}
+                onChange={(e) => setEditMessage(e.target.value)}
+                rows={5}
+                style={{ width: "100%", resize: "vertical" }}
+              />
+            </label>
+            <label className="field">
+              <span>E-Mail-Betreff</span>
+              <input
+                type="text"
+                value={editSubject}
+                onChange={(e) => setEditSubject(e.target.value)}
+                style={{ width: "100%" }}
+              />
+            </label>
+            <label className="field">
+              <span>E-Mail-Text</span>
+              <textarea
+                value={editBody}
+                onChange={(e) => setEditBody(e.target.value)}
+                rows={5}
+                style={{ width: "100%", resize: "vertical" }}
+              />
+            </label>
             <div className="comment-actions">
               <button
                 className="btn small"
                 onClick={async () => {
-                  await onMutate(lead.id, { generated_message: editMessage });
+                  const changes: {
+                    generated_message?: string;
+                    email_subject?: string;
+                    email_body?: string;
+                  } = {};
+                  if (editMessage !== (lead.generated_message || "")) {
+                    changes.generated_message = editMessage;
+                  }
+                  if (editSubject !== (lead.email_subject || "")) {
+                    changes.email_subject = editSubject;
+                  }
+                  if (editBody !== (lead.email_body || "")) {
+                    changes.email_body = editBody;
+                  }
+                  await onMutate(lead.id, changes);
                   setIsEditing(false);
                 }}
               >
@@ -483,17 +624,69 @@ function LeadCard({
         <div className="lead-detail">
           <div className="detail-block">
             <div className="detail-label">Generierte Nachricht (LinkedIn)</div>
-            <p className="message">{lead.generated_message || "—"}</p>
+            <p className={pendingFields.has("generated_message") ? "message diff" : "message"}>
+              <DiffField
+                current={lead.generated_message}
+                original={lead.generated_message_original}
+                isPending={pendingFields.has("generated_message")}
+              />
+            </p>
+            {pendingFields.has("generated_message") && (
+              <PendingEditNote
+                fieldKey="generated_message"
+                isAdmin={isAdmin}
+                onMutate={onMutate}
+                leadId={lead.id}
+              />
+            )}
           </div>
-          {(lead.email_subject || lead.email_body) && (
+          {(lead.email_subject ||
+            lead.email_body ||
+            pendingFields.has("email_subject") ||
+            pendingFields.has("email_body")) && (
             <div className="detail-block">
               <div className="detail-label">Generierte E-Mail</div>
-              {lead.email_subject && (
-                <p className="email-subject">
-                  <strong>Betreff:</strong> {lead.email_subject}
-                </p>
+              {(lead.email_subject || pendingFields.has("email_subject")) && (
+                <>
+                  <p
+                    className={
+                      pendingFields.has("email_subject")
+                        ? "email-subject diff"
+                        : "email-subject"
+                    }
+                  >
+                    <strong>Betreff:</strong>{" "}
+                    <DiffField
+                      current={lead.email_subject}
+                      original={lead.email_subject_original}
+                      isPending={pendingFields.has("email_subject")}
+                    />
+                  </p>
+                  {pendingFields.has("email_subject") && (
+                    <PendingEditNote
+                      fieldKey="email_subject"
+                      isAdmin={isAdmin}
+                      onMutate={onMutate}
+                      leadId={lead.id}
+                    />
+                  )}
+                </>
               )}
-              <p className="message">{lead.email_body || "—"}</p>
+              <p className={pendingFields.has("email_body") ? "message diff" : "message"}>
+                <DiffField
+                  current={lead.email_body}
+                  original={lead.email_body_original}
+                  isPending={pendingFields.has("email_body")}
+                />
+              </p>
+              {pendingFields.has("email_body") && (
+                <PendingEditNote
+                  fieldKey="email_body"
+                  isAdmin={isAdmin}
+                  onMutate={onMutate}
+                  leadId={lead.id}
+                />
+              )}
             </div>
           )}
           {lead.research_summary && (
@@ -540,8 +733,8 @@ function ReportTable({ report }: { report: WeekReportRow[] }) {
             <th>Leads</th>
             <th>Freigegeben</th>
             <th>Gesendet</th>
-            <th>davon DM</th>
-            <th>davon E-Mail</th>
+            <th>DM</th>
+            <th>E-Mail</th>
             <th>Antworten</th>
             <th>Calls</th>
             <th>Antwortrate</th>
@@ -605,12 +798,24 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
 
   const [name, setName] = useState("");
   const [token, setToken] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // The link shown for copying right after a successful create.
-  const [createdLink, setCreatedLink] = useState<string | null>(null);
+  // Shown right after a successful create, so the credentials can be copied
+  // and sent to the customer once — they aren't retrievable afterwards.
+  const [createdCreds, setCreatedCreds] = useState<
+    { username: string; password: string } | null
+  >(null);
   const [copied, setCopied] = useState(false);
+
+  // Per-row "set/change login" editor.
+  const [credsEditingToken, setCredsEditingToken] = useState<string | null>(null);
+  const [credsUsername, setCredsUsername] = useState("");
+  const [credsPassword, setCredsPassword] = useState("");
+  const [credsError, setCredsError] = useState<string | null>(null);
+  const [credsSaving, setCredsSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoadError(false);
@@ -630,10 +835,8 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
     load();
   }, [load]);
 
-  function dashboardLink(clientToken: string): string {
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "";
-    return `${origin}/?token=${encodeURIComponent(clientToken)}`;
+  function loginUrl(): string {
+    return typeof window !== "undefined" ? window.location.origin : "";
   }
 
   async function copy(text: string) {
@@ -649,12 +852,17 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
-    setCreatedLink(null);
+    setCreatedCreds(null);
 
     const cleanName = name.trim();
     const cleanToken = token.trim();
     if (!cleanName || !cleanToken) {
       setFormError("Bitte Kundenname und Token ausfüllen.");
+      return;
+    }
+    const cleanUsername = username.trim();
+    if ((cleanUsername && !password) || (!cleanUsername && password)) {
+      setFormError("Benutzername und Passwort nur zusammen ausfüllen.");
       return;
     }
 
@@ -667,6 +875,8 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
           name: cleanName,
           token: cleanToken,
           adminToken,
+          username: cleanUsername || undefined,
+          password: password || undefined,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -676,9 +886,13 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
         setFormError(data.error ?? "Anlegen fehlgeschlagen.");
         return;
       }
-      setCreatedLink(dashboardLink(cleanToken));
+      if (cleanUsername) {
+        setCreatedCreds({ username: cleanUsername, password });
+      }
       setName("");
       setToken("");
+      setUsername("");
+      setPassword("");
       await load();
     } catch {
       setFormError("Netzwerkfehler. Bitte erneut versuchen.");
@@ -711,6 +925,45 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
     }
   }
 
+  function openCredsEditor(c: ClientWithCount) {
+    setCredsEditingToken(c.token);
+    setCredsUsername(c.username || "");
+    setCredsPassword("");
+    setCredsError(null);
+  }
+
+  async function saveCreds(clientToken: string) {
+    setCredsError(null);
+    if (!credsUsername.trim() || !credsPassword) {
+      setCredsError("Benutzername und Passwort sind erforderlich.");
+      return;
+    }
+    setCredsSaving(true);
+    try {
+      const res = await fetch("/api/clients", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: clientToken,
+          adminToken,
+          username: credsUsername.trim(),
+          password: credsPassword,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setCredsError(data.error ?? "Speichern fehlgeschlagen.");
+        return;
+      }
+      setCredsEditingToken(null);
+      await load();
+    } catch {
+      setCredsError("Netzwerkfehler. Bitte erneut versuchen.");
+    } finally {
+      setCredsSaving(false);
+    }
+  }
+
   return (
     <section className="clients-panel">
       <div className="clients-list-card">
@@ -728,6 +981,7 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
                 <th>Name</th>
                 <th>Token</th>
                 <th>Leads</th>
+                <th>Login</th>
                 <th></th>
               </tr>
             </thead>
@@ -739,6 +993,57 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
                     <code>{c.token}</code>
                   </td>
                   <td>{c.leadCount}</td>
+                  <td>
+                    {credsEditingToken === c.token ? (
+                      <div className="creds-editor">
+                        <input
+                          type="text"
+                          placeholder="Benutzername"
+                          value={credsUsername}
+                          onChange={(e) => setCredsUsername(e.target.value)}
+                        />
+                        <input
+                          type="password"
+                          placeholder="Neues Passwort"
+                          value={credsPassword}
+                          onChange={(e) => setCredsPassword(e.target.value)}
+                        />
+                        {credsError && <p className="form-error">{credsError}</p>}
+                        <div className="creds-editor-actions">
+                          <button
+                            type="button"
+                            className="btn small"
+                            disabled={credsSaving}
+                            onClick={() => saveCreds(c.token)}
+                          >
+                            {credsSaving ? "Speichert…" : "Speichern"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn ghost small"
+                            onClick={() => setCredsEditingToken(null)}
+                          >
+                            Abbrechen
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {c.hasLogin ? (
+                          <code>{c.username}</code>
+                        ) : (
+                          <span className="muted">kein Login</span>
+                        )}{" "}
+                        <button
+                          type="button"
+                          className="btn ghost small"
+                          onClick={() => openCredsEditor(c)}
+                        >
+                          {c.hasLogin ? "Ändern" : "Einrichten"}
+                        </button>
+                      </>
+                    )}
+                  </td>
                   <td className="client-cell-actions">
                     <button
                       className="btn reject small"
@@ -786,6 +1091,26 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
           </div>
         </label>
 
+        <label className="field">
+          <span>Login-Benutzername</span>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="z. B. bonusleben"
+          />
+        </label>
+
+        <label className="field">
+          <span>Login-Passwort</span>
+          <input
+            type="text"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Passwort für den Kunden"
+          />
+        </label>
+
         {formError && <p className="form-error">{formError}</p>}
 
         <div className="form-actions">
@@ -794,15 +1119,24 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
           </button>
         </div>
 
-        {createdLink && (
+        {createdCreds && (
           <div className="created-link">
-            <div className="detail-label">Dashboard-Link</div>
+            <div className="detail-label">Zugangsdaten für den Kunden</div>
+            <p className="muted" style={{ margin: "0 0 8px" }}>
+              Dashboard: <code>{loginUrl()}</code>
+            </p>
             <div className="created-link-row">
-              <code className="link-value">{createdLink}</code>
+              <code className="link-value">
+                {createdCreds.username} / {createdCreds.password}
+              </code>
               <button
                 type="button"
                 className="btn small"
-                onClick={() => copy(createdLink)}
+                onClick={() =>
+                  copy(
+                    `Dashboard: ${loginUrl()}\nBenutzername: ${createdCreds.username}\nPasswort: ${createdCreds.password}`,
+                  )
+                }
               >
                 {copied ? "Kopiert ✓" : "Kopieren"}
               </button>

@@ -28,8 +28,10 @@ async function migrate(db: Client): Promise<void> {
   // idempotent, so it is safe to run on every cold start.
   await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS clients (
-      token TEXT PRIMARY KEY,
-      name  TEXT NOT NULL
+      token         TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      username      TEXT NOT NULL DEFAULT '',
+      password_hash TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS leads (
@@ -49,6 +51,10 @@ async function migrate(db: Client): Promise<void> {
       comment           TEXT NOT NULL DEFAULT '',
       dm_sent_at        TEXT NOT NULL DEFAULT '',
       email_sent_at     TEXT NOT NULL DEFAULT '',
+      generated_message_original TEXT NOT NULL DEFAULT '',
+      email_subject_original     TEXT NOT NULL DEFAULT '',
+      email_body_original        TEXT NOT NULL DEFAULT '',
+      pending_edit_fields         TEXT NOT NULL DEFAULT '',
       created_at        TEXT NOT NULL,
       updated_at        TEXT NOT NULL,
       FOREIGN KEY (client_token) REFERENCES clients(token)
@@ -88,6 +94,45 @@ async function migrate(db: Client): Promise<void> {
       "ALTER TABLE leads ADD COLUMN email_sent_at TEXT NOT NULL DEFAULT ''",
     );
   }
+  if (!existing.has("generated_message_original")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN generated_message_original TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (!existing.has("email_subject_original")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN email_subject_original TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (!existing.has("email_body_original")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN email_body_original TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (!existing.has("pending_edit_fields")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN pending_edit_fields TEXT NOT NULL DEFAULT ''",
+    );
+  }
+
+  // Same idempotent-add pattern for the clients table's login columns.
+  const clientCols = await db.execute("PRAGMA table_info(clients)");
+  const existingClientCols = new Set(clientCols.rows.map((r) => String(r.name)));
+  if (!existingClientCols.has("username")) {
+    await db.execute(
+      "ALTER TABLE clients ADD COLUMN username TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (!existingClientCols.has("password_hash")) {
+    await db.execute(
+      "ALTER TABLE clients ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  // Usernames must be unique across clients once set (empty = no login yet,
+  // and many clients can share that "unset" state, hence the partial index).
+  await db.execute(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_username ON clients(username) WHERE username <> ''",
+  );
 }
 
 // Seed a couple of demo clients + sample leads on first run so the dashboard

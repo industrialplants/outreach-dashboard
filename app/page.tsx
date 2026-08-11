@@ -1,4 +1,6 @@
+import { cookies } from "next/headers";
 import { ADMIN_TOKEN } from "@/lib/db";
+import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth";
 import {
   computeKpis,
   getClient,
@@ -7,7 +9,7 @@ import {
   weeklyReport,
 } from "@/lib/store";
 import Dashboard from "./components/Dashboard";
-import AccessGate from "./components/AccessGate";
+import LoginForm from "./components/LoginForm";
 
 // Async searchParams — required in Next.js 16 (see AGENTS.md / v16 breaking changes).
 export default async function Page(props: PageProps<"/">) {
@@ -20,10 +22,6 @@ export default async function Page(props: PageProps<"/">) {
   const clientParam = (
     Array.isArray(rawClient) ? rawClient[0] : rawClient
   )?.trim();
-
-  if (!token) {
-    return <AccessGate reason="missing" />;
-  }
 
   const isAdmin = token === ADMIN_TOKEN;
 
@@ -61,9 +59,19 @@ export default async function Page(props: PageProps<"/">) {
     );
   }
 
-  const client = await getClient(token);
+  // Clients no longer get in via a link token — only via a real login. Any
+  // ?token= value that isn't the admin token is simply ignored below; the
+  // session cookie set by /api/login is the only way in from here on.
+  const cookieStore = await cookies();
+  const sessionClientToken = verifySessionToken(
+    cookieStore.get(SESSION_COOKIE)?.value,
+  );
+  const client = sessionClientToken
+    ? await getClient(sessionClientToken)
+    : undefined;
+
   if (!client) {
-    return <AccessGate reason="invalid" />;
+    return <LoginForm />;
   }
 
   const [leads, kpis, report] = await Promise.all([

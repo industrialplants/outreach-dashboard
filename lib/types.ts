@@ -47,6 +47,15 @@ export interface Lead {
   comment: string;
   dm_sent_at: string; // ISO 8601, empty string = not yet sent via LinkedIn DM
   email_sent_at: string; // ISO 8601, empty string = not yet sent via email
+  // Customer-edit tracking: when a client edits a field, its pre-edit value
+  // is snapshotted here so the diff can be shown until an admin accepts or
+  // reverts it. Empty string = no pending edit captured for that field.
+  generated_message_original: string;
+  email_subject_original: string;
+  email_body_original: string;
+  // Comma-separated subset of "generated_message,email_subject,email_body" —
+  // which fields currently have an unreviewed customer edit.
+  pending_edit_fields: string;
   created_at: string; // ISO 8601
   updated_at: string; // ISO 8601
 }
@@ -54,6 +63,8 @@ export interface Lead {
 export interface Client {
   token: string;
   name: string;
+  username: string; // empty string = no login set up yet
+  hasLogin: boolean; // username AND password are both set
 }
 
 // A client enriched with its lead count, for the admin "Kunden" tab.

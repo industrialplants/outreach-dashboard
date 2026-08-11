@@ -12,6 +12,10 @@ interface PatchBody {
   status?: string;
   comment?: string;
   generated_message?: string;
+  email_subject?: string;
+  email_body?: string;
+  accept_fields?: string[];
+  revert_fields?: string[];
   dm_sent_at?: string;
   email_sent_at?: string;
   token?: string; // caller's board token, used to authorize the change
@@ -53,12 +57,29 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 
+  // Editing any of the three message fields resurfaces the lead for review,
+  // regardless of who edited it (unless a status was explicitly requested).
+  const editedAMessageField =
+    body.generated_message !== undefined ||
+    body.email_subject !== undefined ||
+    body.email_body !== undefined;
+
   const updated = await updateLead(leadId, {
-    status: body.generated_message ? "revised" : (isValidStatus(body.status) ? body.status : undefined),
+    status: editedAMessageField
+      ? "revised"
+      : isValidStatus(body.status)
+        ? body.status
+        : undefined,
     comment: body.comment,
     generated_message: body.generated_message,
+    email_subject: body.email_subject,
+    email_body: body.email_body,
     dm_sent_at: body.dm_sent_at,
     email_sent_at: body.email_sent_at,
+    isAdminEdit: isAdmin,
+    // Accept/revert only ever make sense as an admin review action.
+    acceptFields: isAdmin ? body.accept_fields : undefined,
+    revertFields: isAdmin ? body.revert_fields : undefined,
   });
 
   return NextResponse.json({ ok: true, lead: updated });
