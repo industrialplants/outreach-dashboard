@@ -3,6 +3,12 @@ import { createClient, type Client, type InStatement } from "@libsql/client";
 // The admin board is reached via /?token=admin. Overridable via env for real deployments.
 export const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "admin";
 
+// Real admin login (username + password), used by the login form as an
+// alternative to the ?token=admin link. Set these in Vercel's env vars;
+// falls back to something usable out of the box if unset.
+export const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "admin";
+export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? ADMIN_TOKEN;
+
 // Reuse a single client + one-time init across hot-reloads in dev and warm
 // serverless invocations (Next re-evaluates modules; globals survive).
 declare global {

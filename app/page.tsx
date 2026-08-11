@@ -23,7 +23,12 @@ export default async function Page(props: PageProps<"/">) {
     Array.isArray(rawClient) ? rawClient[0] : rawClient
   )?.trim();
 
-  const isAdmin = token === ADMIN_TOKEN;
+  // Admin gets in either the old way (?token=admin link, unchanged) or via a
+  // real login — /api/login signs a session whose payload is the ADMIN_TOKEN
+  // sentinel for an admin login, so both paths converge here.
+  const cookieStore = await cookies();
+  const sessionValue = verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
+  const isAdmin = token === ADMIN_TOKEN || sessionValue === ADMIN_TOKEN;
 
   if (isAdmin) {
     const clients = await listClients();
@@ -62,13 +67,7 @@ export default async function Page(props: PageProps<"/">) {
   // Clients no longer get in via a link token — only via a real login. Any
   // ?token= value that isn't the admin token is simply ignored below; the
   // session cookie set by /api/login is the only way in from here on.
-  const cookieStore = await cookies();
-  const sessionClientToken = verifySessionToken(
-    cookieStore.get(SESSION_COOKIE)?.value,
-  );
-  const client = sessionClientToken
-    ? await getClient(sessionClientToken)
-    : undefined;
+  const client = sessionValue ? await getClient(sessionValue) : undefined;
 
   if (!client) {
     return <LoginForm />;

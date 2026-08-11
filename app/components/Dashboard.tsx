@@ -137,21 +137,33 @@ export default function Dashboard({
         <div className="topbar-right">
           {isPending && <span className="syncing">aktualisiere…</span>}
           {role === "admin" ? (
-            <label className="client-switch">
-              <span>Kunde</span>
-              <select
-                value={selected?.token ?? ""}
-                onChange={(e) => switchClient(e.target.value)}
-                disabled={clients.length === 0}
+            <>
+              <label className="client-switch">
+                <span>Kunde</span>
+                <select
+                  value={selected?.token ?? ""}
+                  onChange={(e) => switchClient(e.target.value)}
+                  disabled={clients.length === 0}
+                >
+                  {clients.length === 0 && <option value="">Keine Kunden</option>}
+                  {clients.map((c) => (
+                    <option key={c.token} value={c.token}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="btn ghost small"
+                onClick={async () => {
+                  await fetch("/api/logout", { method: "POST" });
+                  router.push("/");
+                  router.refresh();
+                }}
               >
-                {clients.length === 0 && <option value="">Keine Kunden</option>}
-                {clients.map((c) => (
-                  <option key={c.token} value={c.token}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                Abmelden
+              </button>
+            </>
           ) : (
             <>
               <span className="client-name">{selected?.name}</span>

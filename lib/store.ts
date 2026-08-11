@@ -100,7 +100,7 @@ export async function createClient(
 ): Promise<Client | { error: string } | undefined> {
   if (await getClient(token)) return undefined;
   const db = await getDb();
-  const cleanUsername = username?.trim() ?? "";
+  const cleanUsername = (username?.trim() ?? "").toLowerCase();
   const passwordHash = passwordPlain ? hashPassword(passwordPlain) : "";
   if (cleanUsername) {
     const existing = await findClientByUsername(cleanUsername);
@@ -127,7 +127,7 @@ export async function updateClientCredentials(
   const client = await getClient(token);
   if (!client) return { ok: false, error: "Kunde nicht gefunden." };
 
-  const cleanUsername = username.trim();
+  const cleanUsername = username.trim().toLowerCase();
   if (!cleanUsername || !passwordPlain) {
     return { ok: false, error: "Benutzername und Passwort sind erforderlich." };
   }
@@ -165,7 +165,7 @@ export async function verifyClientLogin(
   username: string,
   password: string,
 ): Promise<Client | undefined> {
-  const cleanUsername = username.trim();
+  const cleanUsername = username.trim().toLowerCase();
   if (!cleanUsername || !password) return undefined;
   const found = await findClientByUsername(cleanUsername);
   if (!found || !found.passwordHash) return undefined;
