@@ -210,6 +210,18 @@ code {
 
 /* ---------- KPIs ---------- */
 
+.backfill-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
 .kpis {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

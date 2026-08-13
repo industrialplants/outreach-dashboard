@@ -215,6 +215,26 @@ export async function listLeads(clientToken: string): Promise<Lead[]> {
   return rs.rows.map(mapLead);
 }
 
+// One-time backfill (13.08.2026): before the DM/E-Mail split, a single
+// "Gesendet" button covered LinkedIn only — email automation didn't exist
+// yet. Any lead that reached sent/replied/call_booked back then still has
+// both channel timestamps empty. Safe to run repeatedly: once backfilled, a
+// lead no longer matches the WHERE clause, so nothing gets touched twice.
+export async function backfillLegacySentAsDm(clientToken: string): Promise<number> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: `UPDATE leads
+           SET dm_sent_at = updated_at
+           WHERE client_token = ?
+             AND status IN ('sent', 'replied', 'call_booked')
+             AND dm_sent_at = ''
+             AND email_sent_at = ''`,
+    args: [clientToken],
+  });
+  return rs.rowsAffected;
+}
+
+
 // Leads that are approved, have an email drafted, and haven't been sent by
 // email yet — the queue for the automated Microsoft Graph send job.
 // The pending_edit_fields check below is now mostly a defensive backstop:

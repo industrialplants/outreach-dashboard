@@ -68,12 +68,38 @@ export default function Dashboard({
   const [isPending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editMessage, setEditMessage] = useState("");
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillDone, setBackfillDone] = useState<number | null>(null);
 
   // Token used to authorize mutations against the API.
   const authToken = role === "admin" ? adminToken! : selected!.token;
 
   function switchClient(clientToken: string) {
     router.push(`/?token=${encodeURIComponent(adminToken!)}&client=${encodeURIComponent(clientToken)}`);
+  }
+
+  async function backfillLegacySends() {
+    if (!selected) return;
+    setBackfilling(true);
+    setBackfillDone(null);
+    try {
+      const res = await fetch("/api/backfill-dm-sent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminToken, clientToken: selected.token }),
+      });
+      const data = (await res.json()) as { updated?: number; error?: string };
+      if (!res.ok) {
+        alert(data.error ?? "Nachtragen fehlgeschlagen.");
+        return;
+      }
+      setBackfillDone(data.updated ?? 0);
+      router.refresh();
+    } catch {
+      alert("Netzwerkfehler. Bitte erneut versuchen.");
+    } finally {
+      setBackfilling(false);
+    }
   }
 
   async function mutate(
@@ -217,6 +243,24 @@ export default function Dashboard({
         </section>
       ) : tab === "leads" ? (
         <>
+          {role === "admin" && (
+            <div className="backfill-hint">
+              <span className="muted">
+                Alte Leads mit Status „Gesendet“ o. ä. ohne Kanal-Zuordnung
+                (von vor der DM/E-Mail-Trennung) als „DM gesendet“ nachtragen.
+              </span>
+              <button
+                className="btn ghost small"
+                onClick={backfillLegacySends}
+                disabled={backfilling}
+              >
+                {backfilling ? "Trage nach…" : "Alte LinkedIn-Sends nachtragen"}
+              </button>
+              {backfillDone !== null && (
+                <span className="muted"> → {backfillDone} Leads aktualisiert</span>
+              )}
+            </div>
+          )}
           {kpis && <KpiRow kpis={kpis} />}
           <nav className="lead-filters">
             {LEAD_FILTERS.map((f) => {
