@@ -215,6 +215,27 @@ export async function listLeads(clientToken: string): Promise<Lead[]> {
   return rs.rows.map(mapLead);
 }
 
+// Leads that are approved, have an email drafted, and haven't been sent by
+// email yet — the queue for the automated Microsoft Graph send job.
+export async function listSendableEmails(
+  clientToken: string,
+  limit: number,
+): Promise<Lead[]> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: `SELECT * FROM leads
+           WHERE client_token = ?
+             AND status = 'approved'
+             AND email_sent_at = ''
+             AND trim(email_body) <> ''
+             AND trim(email) <> ''
+           ORDER BY datetime(created_at) ASC
+           LIMIT ?`,
+    args: [clientToken, limit],
+  });
+  return rs.rows.map(mapLead);
+}
+
 export async function getLead(id: number): Promise<Lead | undefined> {
   const db = await getDb();
   const rs = await db.execute({

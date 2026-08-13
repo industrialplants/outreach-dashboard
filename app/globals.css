@@ -560,6 +560,14 @@ code {
   padding: 20px;
 }
 
+.send-emails-card .btn {
+  margin-top: 4px;
+}
+.send-result {
+  margin-top: 14px;
+  font-size: 14px;
+}
+
 .section-title {
   margin: 0 0 16px;
   font-size: 15px;

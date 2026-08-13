@@ -976,8 +976,79 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
     }
   }
 
+  // Manual trigger for the automated Microsoft Graph send job — useful right
+  // now on the Hobby plan (no frequent Cron yet) and as a manual override later.
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState<
+    { sent: number; failed: number; errors: string[] } | { error: string } | null
+  >(null);
+
+  async function sendEmailsNow() {
+    setSending(true);
+    setSendResult(null);
+    try {
+      const res = await fetch("/api/send-emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminToken }),
+      });
+      const data = (await res.json()) as {
+        sent?: number;
+        failed?: number;
+        errors?: string[];
+        error?: string;
+      };
+      if (!res.ok || data.error) {
+        setSendResult({ error: data.error ?? "Senden fehlgeschlagen." });
+      } else {
+        setSendResult({
+          sent: data.sent ?? 0,
+          failed: data.failed ?? 0,
+          errors: data.errors ?? [],
+        });
+      }
+      await load();
+    } catch {
+      setSendResult({ error: "Netzwerkfehler. Bitte erneut versuchen." });
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <section className="clients-panel">
+      <div className="clients-list-card send-emails-card">
+        <h2 className="section-title">E-Mail-Versand (Microsoft)</h2>
+        <p className="muted" style={{ margin: "0 0 12px" }}>
+          Verschickt freigegebene, noch nicht gesendete E-Mails direkt aus dem
+          konfigurierten Postfach. Läuft automatisch alle 15 Minuten — der
+          Button hier ist für den sofortigen Testlauf oder falls mal was
+          Dringendes rausmuss.
+        </p>
+        <button className="btn approve" onClick={sendEmailsNow} disabled={sending}>
+          {sending ? "Sendet…" : "Jetzt E-Mails senden"}
+        </button>
+        {sendResult && (
+          <div className="send-result">
+            {"error" in sendResult ? (
+              <p className="form-error">{sendResult.error}</p>
+            ) : (
+              <>
+                <p>
+                  ✅ {sendResult.sent} gesendet
+                  {sendResult.failed > 0 && `, ❌ ${sendResult.failed} fehlgeschlagen`}
+                </p>
+                {sendResult.errors.map((e, i) => (
+                  <p key={i} className="form-error">
+                    {e}
+                  </p>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="clients-list-card">
         <h2 className="section-title">Kunden</h2>
         {loadError ? (
