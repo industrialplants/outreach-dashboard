@@ -217,6 +217,11 @@ export async function listLeads(clientToken: string): Promise<Lead[]> {
 
 // Leads that are approved, have an email drafted, and haven't been sent by
 // email yet — the queue for the automated Microsoft Graph send job.
+// The pending_edit_fields check below is now mostly a defensive backstop:
+// since 13.08.2026, approving a lead (status='approved') auto-clears any
+// pending customer-edit marker (decided with the client — "Freigeben" alone
+// is the trust signal now, no separate manual review step). This condition
+// should therefore rarely if ever exclude anything in practice.
 export async function listSendableEmails(
   clientToken: string,
   limit: number,
@@ -229,6 +234,8 @@ export async function listSendableEmails(
              AND email_sent_at = ''
              AND trim(email_body) <> ''
              AND trim(email) <> ''
+             AND pending_edit_fields NOT LIKE '%email_subject%'
+             AND pending_edit_fields NOT LIKE '%email_body%'
            ORDER BY datetime(created_at) ASC
            LIMIT ?`,
     args: [clientToken, limit],
@@ -436,6 +443,16 @@ export async function updateLead(
         pending.add(field);
       }
       current[field] = incoming;
+    }
+  }
+
+  // Decided with the client (13.08.2026): clicking "Freigeben" is itself the
+  // trust signal, whoever clicks it — no separate manual "Übernehmen" gate.
+  // Approving a lead auto-clears any still-pending edit markers on it.
+  if (changes.status === "approved") {
+    for (const field of TRACKED_FIELDS) {
+      original[field] = "";
+      pending.delete(field);
     }
   }
 

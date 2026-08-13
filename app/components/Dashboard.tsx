@@ -336,16 +336,10 @@ function LeadList({
 
 // Renders text as-is, or — when a customer edit is pending review — as a
 // Google-Docs-style diff: old wording struck through, new wording inserted.
-function DiffField({
-  current,
-  original,
-  isPending,
-}: {
-  current: string;
-  original: string;
-  isPending: boolean;
-}) {
-  if (!isPending) return <>{current || "—"}</>;
+// The word-diff view, used only inside the secondary "review" block below —
+// never mixed into the primary text, so there's never any doubt about what
+// the actual current (sendable) text is.
+function DiffView({ current, original }: { current: string; original: string }) {
   const parts = wordDiff(original, current);
   return (
     <>
@@ -359,15 +353,21 @@ function DiffField({
 }
 
 // Shown under a field that has an unreviewed customer edit. Clients just see
-// a note; admins get the review actions (keep the new wording, or throw it
-// away and restore what the AI originally generated).
+// a note; admins get the actual diff plus review actions (keep the new
+// wording, or throw it away and restore what the AI originally generated).
+// This is deliberately visually separate from the main text above it — the
+// main text is always the literal current value, nothing struck through.
 function PendingEditNote({
   fieldKey,
+  current,
+  original,
   isAdmin,
   onMutate,
   leadId,
 }: {
   fieldKey: string;
+  current: string;
+  original: string;
   isAdmin: boolean;
   onMutate: (
     id: number,
@@ -383,20 +383,28 @@ function PendingEditNote({
     );
   }
   return (
-    <div className="diff-note diff-note-admin">
-      <span>✏️ Vom Kunden bearbeitet</span>
-      <button
-        className="btn small"
-        onClick={() => onMutate(leadId, { accept_fields: [fieldKey] })}
-      >
-        Übernehmen
-      </button>
-      <button
-        className="btn ghost small"
-        onClick={() => onMutate(leadId, { revert_fields: [fieldKey] })}
-      >
-        Original wiederherstellen
-      </button>
+    <div className="diff-review">
+      <div className="diff-review-label">
+        ✏️ Vom Kunden bearbeitet — Vergleich zum KI-Original (nur zur Info,
+        oben steht bereits der aktuelle Text):
+      </div>
+      <p className="diff-review-text">
+        <DiffView current={current} original={original} />
+      </p>
+      <div className="diff-note-admin">
+        <button
+          className="btn small"
+          onClick={() => onMutate(leadId, { accept_fields: [fieldKey] })}
+        >
+          Übernehmen
+        </button>
+        <button
+          className="btn ghost small"
+          onClick={() => onMutate(leadId, { revert_fields: [fieldKey] })}
+        >
+          Original wiederherstellen
+        </button>
+      </div>
     </div>
   );
 }
@@ -451,6 +459,11 @@ function LeadCard({
           <span className={`status-pill status-${lead.status}`}>
             {STATUS_LABELS[lead.status]}
           </span>
+          {isAdmin && pendingFields.size > 0 && (
+            <span className="status-pill pending-review-pill" title="Kundenänderung wartet auf Review">
+              ⏳ Review
+            </span>
+          )}
           <select
             className="status-select"
             value={lead.status}
@@ -635,17 +648,18 @@ function LeadCard({
       {open && (
         <div className="lead-detail">
           <div className="detail-block">
-            <div className="detail-label">Generierte Nachricht (LinkedIn)</div>
-            <p className={pendingFields.has("generated_message") ? "message diff" : "message"}>
-              <DiffField
-                current={lead.generated_message}
-                original={lead.generated_message_original}
-                isPending={pendingFields.has("generated_message")}
-              />
-            </p>
+            <div className="detail-label">
+              Generierte Nachricht (LinkedIn)
+              {pendingFields.has("generated_message") && (
+                <span className="pending-badge"> · ⏳ Änderung wartet auf Review</span>
+              )}
+            </div>
+            <p className="message">{lead.generated_message || "—"}</p>
             {pendingFields.has("generated_message") && (
               <PendingEditNote
                 fieldKey="generated_message"
+                current={lead.generated_message}
+                original={lead.generated_message_original}
                 isAdmin={isAdmin}
                 onMutate={onMutate}
                 leadId={lead.id}
@@ -657,26 +671,23 @@ function LeadCard({
             pendingFields.has("email_subject") ||
             pendingFields.has("email_body")) && (
             <div className="detail-block">
-              <div className="detail-label">Generierte E-Mail</div>
+              <div className="detail-label">
+                Generierte E-Mail
+                {(pendingFields.has("email_subject") ||
+                  pendingFields.has("email_body")) && (
+                  <span className="pending-badge"> · ⏳ Änderung wartet auf Review</span>
+                )}
+              </div>
               {(lead.email_subject || pendingFields.has("email_subject")) && (
                 <>
-                  <p
-                    className={
-                      pendingFields.has("email_subject")
-                        ? "email-subject diff"
-                        : "email-subject"
-                    }
-                  >
-                    <strong>Betreff:</strong>{" "}
-                    <DiffField
-                      current={lead.email_subject}
-                      original={lead.email_subject_original}
-                      isPending={pendingFields.has("email_subject")}
-                    />
+                  <p className="email-subject">
+                    <strong>Betreff:</strong> {lead.email_subject || "—"}
                   </p>
                   {pendingFields.has("email_subject") && (
                     <PendingEditNote
                       fieldKey="email_subject"
+                      current={lead.email_subject}
+                      original={lead.email_subject_original}
                       isAdmin={isAdmin}
                       onMutate={onMutate}
                       leadId={lead.id}
@@ -684,16 +695,12 @@ function LeadCard({
                   )}
                 </>
               )}
-              <p className={pendingFields.has("email_body") ? "message diff" : "message"}>
-                <DiffField
-                  current={lead.email_body}
-                  original={lead.email_body_original}
-                  isPending={pendingFields.has("email_body")}
-                />
-              </p>
+              <p className="message">{lead.email_body || "—"}</p>
               {pendingFields.has("email_body") && (
                 <PendingEditNote
                   fieldKey="email_body"
+                  current={lead.email_body}
+                  original={lead.email_body_original}
                   isAdmin={isAdmin}
                   onMutate={onMutate}
                   leadId={lead.id}

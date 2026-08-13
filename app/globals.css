@@ -741,31 +741,61 @@ code {
 
 /* ---------- Customer-edit diff ---------- */
 
-.message.diff,
-.email-subject.diff {
-  border-left: 3px solid var(--accent);
+.pending-badge {
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
-.message del,
-.email-subject del {
-  color: var(--muted);
-  text-decoration: line-through;
-  text-decoration-color: var(--red);
-}
-
-.message ins,
-.email-subject ins {
-  color: var(--text);
-  text-decoration: none;
-  background: rgba(255, 14, 78, 0.16);
-  border-radius: 3px;
-  padding: 0 2px;
+.pending-review-pill {
+  color: var(--accent);
+  border-color: rgba(255, 14, 78, 0.45);
+  background: rgba(255, 14, 78, 0.1);
 }
 
 .diff-note {
   margin-top: 8px;
   font-size: 13px;
   color: var(--muted-2);
+}
+
+/* The review block sits clearly below the plain final text, with its own
+   border and muted background, so it never reads as part of the message
+   that will actually be sent. */
+.diff-review {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.diff-review-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.diff-review-text {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.diff-review-text del {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--red);
+}
+
+.diff-review-text ins {
+  color: var(--text);
+  text-decoration: none;
+  background: rgba(255, 14, 78, 0.16);
+  border-radius: 3px;
+  padding: 0 2px;
 }
 
 .diff-note-admin {
