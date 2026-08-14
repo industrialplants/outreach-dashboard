@@ -23,6 +23,7 @@ function toPayload(fields: Record<string, unknown>): WebhookPayload {
     email_body: str(fields.email_body),
     research_summary: str(fields.research_summary),
     signal: str(fields.signal),
+    channel: str(fields.channel),
     client_token: str(fields.client_token),
   };
 }
@@ -128,6 +129,6 @@ export async function GET() {
     endpoint: "clay outreach webhook",
     accepts: "application/json or application/x-www-form-urlencoded",
     expects:
-      "POST { name, company, title, linkedin_url, email, generated_message, email_subject, email_body, research_summary, signal, client_token }",
+      "POST { name, company, title, linkedin_url, email, generated_message, email_subject, email_body, research_summary, signal, client_token, channel (optional: 'linkedin'|'email'|'both', default 'both') }",
   });
 }

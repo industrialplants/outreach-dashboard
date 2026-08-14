@@ -35,7 +35,8 @@ type LeadFilter =
   | "approved"
   | "sent"
   | "rejected"
-  | "call_booked";
+  | "call_booked"
+  | "dnd";
 
 const LEAD_FILTERS: { key: LeadFilter; label: string }[] = [
   { key: "all", label: "Alle" },
@@ -45,12 +46,28 @@ const LEAD_FILTERS: { key: LeadFilter; label: string }[] = [
   { key: "sent", label: "Gesendet" },
   { key: "rejected", label: "Abgelehnt" },
   { key: "call_booked", label: "Call gebucht" },
+  { key: "dnd", label: "Absage / DND" },
 ];
 
 function matchesFilter(lead: Lead, filter: LeadFilter): boolean {
-  // Main view shows everything except booked calls.
-  if (filter === "all") return lead.status !== "call_booked";
+  // Main view shows everything except booked calls and DND/Absage leads —
+  // both are "done, nothing more to do here" states that would just clutter it.
+  if (filter === "all") return lead.status !== "call_booked" && lead.status !== "dnd";
   return lead.status === filter;
+}
+
+type ChannelFilter = "all" | "linkedin" | "email";
+
+const CHANNEL_FILTERS: { key: ChannelFilter; label: string }[] = [
+  { key: "all", label: "Alle Kanäle" },
+  { key: "linkedin", label: "💬 LinkedIn" },
+  { key: "email", label: "📧 E-Mail" },
+];
+
+function matchesChannelFilter(lead: Lead, filter: ChannelFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "linkedin") return lead.channel === "linkedin" || lead.channel === "both";
+  return lead.channel === "email" || lead.channel === "both";
 }
 
 export default function Dashboard({
@@ -65,41 +82,16 @@ export default function Dashboard({
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("leads");
   const [leadFilter, setLeadFilter] = useState<LeadFilter>("all");
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
   const [isPending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editMessage, setEditMessage] = useState("");
-  const [backfilling, setBackfilling] = useState(false);
-  const [backfillDone, setBackfillDone] = useState<number | null>(null);
 
   // Token used to authorize mutations against the API.
   const authToken = role === "admin" ? adminToken! : selected!.token;
 
   function switchClient(clientToken: string) {
     router.push(`/?token=${encodeURIComponent(adminToken!)}&client=${encodeURIComponent(clientToken)}`);
-  }
-
-  async function backfillLegacySends() {
-    if (!selected) return;
-    setBackfilling(true);
-    setBackfillDone(null);
-    try {
-      const res = await fetch("/api/backfill-dm-sent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminToken, clientToken: selected.token }),
-      });
-      const data = (await res.json()) as { updated?: number; error?: string };
-      if (!res.ok) {
-        alert(data.error ?? "Nachtragen fehlgeschlagen.");
-        return;
-      }
-      setBackfillDone(data.updated ?? 0);
-      router.refresh();
-    } catch {
-      alert("Netzwerkfehler. Bitte erneut versuchen.");
-    } finally {
-      setBackfilling(false);
-    }
   }
 
   async function mutate(
@@ -114,6 +106,7 @@ export default function Dashboard({
       revert_fields?: string[];
       dm_sent_at?: string;
       email_sent_at?: string;
+      channel?: string;
     },
   ) {
     const res = await fetch(`/api/leads/${id}`, {
@@ -243,28 +236,29 @@ export default function Dashboard({
         </section>
       ) : tab === "leads" ? (
         <>
-          {role === "admin" && (
-            <div className="backfill-hint">
-              <span className="muted">
-                Alte Leads mit Status „Gesendet“ o. ä. ohne Kanal-Zuordnung
-                (von vor der DM/E-Mail-Trennung) als „DM gesendet“ nachtragen.
-              </span>
-              <button
-                className="btn ghost small"
-                onClick={backfillLegacySends}
-                disabled={backfilling}
-              >
-                {backfilling ? "Trage nach…" : "Alte LinkedIn-Sends nachtragen"}
-              </button>
-              {backfillDone !== null && (
-                <span className="muted"> → {backfillDone} Leads aktualisiert</span>
-              )}
-            </div>
-          )}
           {kpis && <KpiRow kpis={kpis} />}
+          <nav className="channel-filters">
+            {CHANNEL_FILTERS.map((f) => {
+              const count = leads.filter((l) => matchesChannelFilter(l, f.key)).length;
+              return (
+                <button
+                  key={f.key}
+                  className={
+                    channelFilter === f.key ? "filter-chip channel active" : "filter-chip channel"
+                  }
+                  onClick={() => setChannelFilter(f.key)}
+                >
+                  {f.label}
+                  <span className="filter-count">{count}</span>
+                </button>
+              );
+            })}
+          </nav>
           <nav className="lead-filters">
             {LEAD_FILTERS.map((f) => {
-              const count = leads.filter((l) => matchesFilter(l, f.key)).length;
+              const count = leads.filter(
+                (l) => matchesChannelFilter(l, channelFilter) && matchesFilter(l, f.key),
+              ).length;
               return (
                 <button
                   key={f.key}
@@ -280,11 +274,13 @@ export default function Dashboard({
             })}
           </nav>
           <LeadList
-            leads={leads.filter((l) => matchesFilter(l, leadFilter))}
+            leads={leads.filter(
+              (l) => matchesChannelFilter(l, channelFilter) && matchesFilter(l, leadFilter),
+            )}
             onMutate={mutate}
             onDelete={role === "admin" ? removeLead : undefined}
             isAdmin={role === "admin"}
-            filtered={leadFilter !== "all"}
+            filtered={leadFilter !== "all" || channelFilter !== "all"}
           />
         </>
       ) : (
@@ -341,6 +337,7 @@ function LeadList({
       revert_fields?: string[];
       dm_sent_at?: string;
       email_sent_at?: string;
+      channel?: string;
     },
   ) => void;
   onDelete?: (id: number) => void;
@@ -472,6 +469,7 @@ function LeadCard({
       revert_fields?: string[];
       dm_sent_at?: string;
       email_sent_at?: string;
+      channel?: string;
     },
   ) => void;
   onDelete?: (id: number) => void;
@@ -503,6 +501,27 @@ function LeadCard({
           <span className={`status-pill status-${lead.status}`}>
             {STATUS_LABELS[lead.status]}
           </span>
+          {isAdmin ? (
+            <select
+              className="status-pill channel-select"
+              value={lead.channel}
+              title="Kanal ändern — betrifft nur die Zuordnung, nicht den Text"
+              onChange={(e) => onMutate(lead.id, { channel: e.target.value })}
+            >
+              <option value="both">Beide Kanäle</option>
+              <option value="linkedin">💬 Nur LinkedIn</option>
+              <option value="email">📧 Nur E-Mail</option>
+            </select>
+          ) : (
+            lead.channel !== "both" && (
+              <span
+                className="status-pill channel-pill"
+                title="Dieser Lead ist nur für diesen Kanal vorgesehen"
+              >
+                {lead.channel === "linkedin" ? "💬 Nur LinkedIn" : "📧 Nur E-Mail"}
+              </span>
+            )
+          )}
           {isAdmin && pendingFields.size > 0 && (
             <span className="status-pill pending-review-pill" title="Kundenänderung wartet auf Review">
               ⏳ Review
@@ -542,34 +561,54 @@ function LeadCard({
         >
           Ablehnen
         </button>
+        <button
+          className="btn dnd"
+          onClick={() => {
+            if (
+              window.confirm(
+                `${lead.name} hat abgesagt / möchte keinen Kontakt mehr? Damit werden alle weiteren Nachrichten (DM & E-Mail) für diesen Lead dauerhaft gestoppt.`,
+              )
+            ) {
+              onMutate(lead.id, { status: "dnd" });
+            }
+          }}
+          disabled={lead.status === "dnd"}
+        >
+          {lead.status === "dnd" ? "✓ Absage / DND" : "Absage / DND"}
+        </button>
         {lead.status !== "new" &&
           lead.status !== "revised" &&
-          lead.status !== "rejected" && (
+          lead.status !== "rejected" &&
+          lead.status !== "dnd" && (
             <>
-              <button
-                className="btn sent"
-                onClick={() =>
-                  onMutate(lead.id, {
-                    status: "sent",
-                    dm_sent_at: new Date().toISOString(),
-                  })
-                }
-                disabled={!!lead.dm_sent_at}
-              >
-                {lead.dm_sent_at ? "✓ DM gesendet" : "DM gesendet"}
-              </button>
-              <button
-                className="btn sent"
-                onClick={() =>
-                  onMutate(lead.id, {
-                    status: "sent",
-                    email_sent_at: new Date().toISOString(),
-                  })
-                }
-                disabled={!!lead.email_sent_at}
-              >
-                {lead.email_sent_at ? "✓ E-Mail gesendet" : "E-Mail gesendet"}
-              </button>
+              {(lead.channel === "linkedin" || lead.channel === "both") && (
+                <button
+                  className="btn sent"
+                  onClick={() =>
+                    onMutate(lead.id, {
+                      status: "sent",
+                      dm_sent_at: new Date().toISOString(),
+                    })
+                  }
+                  disabled={!!lead.dm_sent_at}
+                >
+                  {lead.dm_sent_at ? "✓ DM gesendet" : "DM gesendet"}
+                </button>
+              )}
+              {(lead.channel === "email" || lead.channel === "both") && (
+                <button
+                  className="btn sent"
+                  onClick={() =>
+                    onMutate(lead.id, {
+                      status: "sent",
+                      email_sent_at: new Date().toISOString(),
+                    })
+                  }
+                  disabled={!!lead.email_sent_at}
+                >
+                  {lead.email_sent_at ? "✓ E-Mail gesendet" : "E-Mail gesendet"}
+                </button>
+              )}
             </>
           )}
         <button className="btn ghost" onClick={() => setShowComment((v) => !v)}>
@@ -653,6 +692,36 @@ function LeadCard({
                 }}
               >
                 Speichern
+              </button>
+              <button
+                className="btn small approve"
+                onClick={async () => {
+                  const changes: {
+                    generated_message?: string;
+                    email_subject?: string;
+                    email_body?: string;
+                  } = {};
+                  if (editMessage !== (lead.generated_message || "")) {
+                    changes.generated_message = editMessage;
+                  }
+                  if (editSubject !== (lead.email_subject || "")) {
+                    changes.email_subject = editSubject;
+                  }
+                  if (editBody !== (lead.email_body || "")) {
+                    changes.email_body = editBody;
+                  }
+                  // Saving an edited message always resets status to
+                  // "Überarbeitet" server-side (by design, so raw edits get a
+                  // second look) — so approving has to be a separate,
+                  // follow-up call, not bundled into the same request.
+                  if (Object.keys(changes).length > 0) {
+                    await onMutate(lead.id, changes);
+                  }
+                  await onMutate(lead.id, { status: "approved" });
+                  setIsEditing(false);
+                }}
+              >
+                Speichern &amp; Freigeben
               </button>
               <button
                 className="btn ghost"

@@ -164,6 +164,28 @@ code {
 
 /* ---------- Lead filters ---------- */
 
+.channel-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-chip.channel {
+  font-weight: 600;
+}
+.filter-chip.channel.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0e0d0d;
+}
+.filter-chip.channel.active .filter-count {
+  color: #0e0d0d;
+  background: rgba(0, 0, 0, 0.2);
+}
+
 .lead-filters {
   display: flex;
   flex-wrap: wrap;
@@ -209,18 +231,6 @@ code {
 }
 
 /* ---------- KPIs ---------- */
-
-.backfill-hint {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  margin-bottom: 16px;
-  padding: 10px 14px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-}
 
 .kpis {
   display: grid;
@@ -352,6 +362,28 @@ code {
   border-color: var(--accent);
   font-weight: 600;
 }
+.status-dnd {
+  color: #fff;
+  background: #4a1420;
+  border-color: rgba(255, 90, 106, 0.6);
+}
+
+.channel-pill {
+  color: var(--muted-2);
+  border-color: var(--border);
+  background: var(--panel-2);
+}
+
+.channel-select {
+  color: var(--muted-2);
+  border-color: var(--border);
+  background: var(--panel-2);
+  cursor: pointer;
+  font-family: inherit;
+}
+.channel-select:hover {
+  border-color: var(--accent);
+}
 
 .signal {
   margin-top: 12px;
@@ -403,6 +435,14 @@ code {
 .btn.sent {
   border-color: rgba(245, 181, 68, 0.5);
   color: var(--amber);
+}
+.btn.dnd {
+  border-color: rgba(255, 90, 106, 0.6);
+  background: #4a1420;
+  color: #ffb3bd;
+}
+.btn.dnd:hover {
+  border-color: var(--red);
 }
 .btn.ghost {
   background: transparent;

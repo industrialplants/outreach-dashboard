@@ -18,6 +18,7 @@ interface PatchBody {
   revert_fields?: string[];
   dm_sent_at?: string;
   email_sent_at?: string;
+  channel?: string; // admin-only: reassigns which channel(s) a lead is meant for
   token?: string; // caller's board token, used to authorize the change
 }
 
@@ -80,6 +81,10 @@ export async function PATCH(
     // Accept/revert only ever make sense as an admin review action.
     acceptFields: isAdmin ? body.accept_fields : undefined,
     revertFields: isAdmin ? body.revert_fields : undefined,
+    // Admin-only, and deliberately independent of every other field here —
+    // reassigning the channel must never touch the message text or its
+    // review status, only which channel(s) the lead is eligible for.
+    channel: isAdmin ? body.channel : undefined,
   });
 
   return NextResponse.json({ ok: true, lead: updated });

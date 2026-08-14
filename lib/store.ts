@@ -6,6 +6,7 @@ import type {
   ClientWithCount,
   Kpis,
   Lead,
+  LeadChannel,
   LeadStatus,
   WeekReportRow,
   WebhookPayload,
@@ -43,6 +44,7 @@ function mapLead(r: Row): Lead {
     signal: String(r.signal),
     status: String(r.status) as LeadStatus,
     comment: String(r.comment),
+    channel: (String(r.channel) || "both") as LeadChannel,
     dm_sent_at: String(r.dm_sent_at),
     email_sent_at: String(r.email_sent_at),
     generated_message_original: String(r.generated_message_original),
@@ -215,28 +217,19 @@ export async function listLeads(clientToken: string): Promise<Lead[]> {
   return rs.rows.map(mapLead);
 }
 
-// One-time backfill (13.08.2026): before the DM/E-Mail split, a single
-// "Gesendet" button covered LinkedIn only — email automation didn't exist
-// yet. Any lead that reached sent/replied/call_booked back then still has
-// both channel timestamps empty. Safe to run repeatedly: once backfilled, a
-// lead no longer matches the WHERE clause, so nothing gets touched twice.
-export async function backfillLegacySentAsDm(clientToken: string): Promise<number> {
-  const db = await getDb();
-  const rs = await db.execute({
-    sql: `UPDATE leads
-           SET dm_sent_at = updated_at
-           WHERE client_token = ?
-             AND status IN ('sent', 'replied', 'call_booked')
-             AND dm_sent_at = ''
-             AND email_sent_at = ''`,
-    args: [clientToken],
-  });
-  return rs.rowsAffected;
-}
-
 
 // Leads that are approved, have an email drafted, and haven't been sent by
 // email yet — the queue for the automated Microsoft Graph send job.
+// The pending_edit_fields check below is now mostly a defensive backstop:
+// since 13.08.2026, approving a lead (status='approved') auto-clears any
+// pending customer-edit marker (decided with the client — "Freigeben" alone
+// is the trust signal now, no separate manual review step). This condition
+// should therefore rarely if ever exclude anything in practice.
+// Leads that are approved, have an email drafted, and haven't been sent by
+// email yet — the queue for the automated Microsoft Graph send job.
+// Status can be 'approved' (nothing sent yet) OR 'sent' (the DM side already
+// went out — multi-channel leads move to 'sent' after their first channel,
+// but that must not block the email side from still going out separately).
 // The pending_edit_fields check below is now mostly a defensive backstop:
 // since 13.08.2026, approving a lead (status='approved') auto-clears any
 // pending customer-edit marker (decided with the client — "Freigeben" alone
@@ -250,10 +243,11 @@ export async function listSendableEmails(
   const rs = await db.execute({
     sql: `SELECT * FROM leads
            WHERE client_token = ?
-             AND status = 'approved'
+             AND status IN ('approved', 'sent')
              AND email_sent_at = ''
              AND trim(email_body) <> ''
              AND trim(email) <> ''
+             AND channel IN ('email', 'both')
              AND pending_edit_fields NOT LIKE '%email_subject%'
              AND pending_edit_fields NOT LIKE '%email_body%'
            ORDER BY datetime(created_at) ASC
@@ -272,6 +266,15 @@ export async function getLead(id: number): Promise<Lead | undefined> {
   return rs.rows[0] ? mapLead(rs.rows[0]) : undefined;
 }
 
+// Clay sends channel as free text; anything unrecognized safely falls back
+// to "both" rather than silently blocking a lead from every channel. Trimmed
+// and lower-cased so "LinkedIn", " linkedin ", etc. all still match.
+function normalizeChannel(value: string | undefined): LeadChannel {
+  const v = value?.trim().toLowerCase();
+  if (v === "linkedin" || v === "email" || v === "both") return v;
+  return "both";
+}
+
 export async function createLead(payload: WebhookPayload): Promise<Lead> {
   const db = await getDb();
   const now = new Date().toISOString();
@@ -279,11 +282,11 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
   const info = await db.execute({
     sql: `INSERT INTO leads (
         client_token, name, company, title, linkedin_url, email,
-        generated_message, email_subject, email_body, research_summary, signal, status, comment,
+        generated_message, email_subject, email_body, research_summary, signal, status, comment, channel,
         created_at, updated_at
       ) VALUES (
         $client_token, $name, $company, $title, $linkedin_url, $email,
-        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '',
+        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '', $channel,
         $created_at, $updated_at
       )`,
     args: {
@@ -298,6 +301,7 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
       email_body: payload.email_body ?? "",
       research_summary: payload.research_summary ?? "",
       signal: payload.signal ?? "",
+      channel: normalizeChannel(payload.channel),
       created_at: now,
       updated_at: now,
     },
@@ -327,11 +331,11 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
   await db.execute({
     sql: `INSERT INTO leads (
         client_token, name, company, title, linkedin_url, email,
-        generated_message, email_subject, email_body, research_summary, signal, status, comment,
+        generated_message, email_subject, email_body, research_summary, signal, status, comment, channel,
         created_at, updated_at
       ) VALUES (
         $client_token, $name, $company, $title, $linkedin_url, $email,
-        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '',
+        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '', $channel,
         $created_at, $updated_at
       )
       ON CONFLICT(client_token, linkedin_url) WHERE linkedin_url <> ''
@@ -342,10 +346,17 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
         signal            = excluded.signal,
         research_summary  = excluded.research_summary,
         title             = excluded.title,
+        channel           = excluded.channel,
         -- A re-send of an already-reviewed lead flags it as revised so it
         -- resurfaces for another look; untouched 'new' leads stay 'new'.
-        status            = CASE WHEN leads.status = 'new'
-                                 THEN 'new' ELSE 'revised' END,
+        -- A DND/Absage lead is sticky — never resurfaces, no matter how
+        -- often Clay re-sends the same person (e.g. re-added to a new list
+        -- by mistake). That guarantee is the whole point of the status.
+        status            = CASE
+                                 WHEN leads.status = 'new' THEN 'new'
+                                 WHEN leads.status = 'dnd' THEN 'dnd'
+                                 ELSE 'revised'
+                               END,
         updated_at        = excluded.updated_at`,
     args: {
       client_token: token,
@@ -359,6 +370,7 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
       email_body: payload.email_body ?? "",
       research_summary: payload.research_summary ?? "",
       signal: payload.signal ?? "",
+      channel: normalizeChannel(payload.channel),
       created_at: now,
       updated_at: now,
     },
@@ -403,6 +415,9 @@ export async function updateLead(
     // throw it away and restore the AI-generated original.
     acceptFields?: string[];
     revertFields?: string[];
+    // Reassigns which channel(s) a lead is eligible for. Deliberately its own
+    // independent field — never touches text, status, or review markers.
+    channel?: string;
   },
 ): Promise<Lead | undefined> {
   const existing = await getLead(id);
@@ -411,6 +426,8 @@ export async function updateLead(
   const status = changes.status ?? existing.status;
   const comment =
     changes.comment !== undefined ? changes.comment : existing.comment;
+  const channel =
+    changes.channel !== undefined ? normalizeChannel(changes.channel) : existing.channel;
   const dm_sent_at =
     changes.dm_sent_at !== undefined ? changes.dm_sent_at : existing.dm_sent_at;
   const email_sent_at =
@@ -479,7 +496,7 @@ export async function updateLead(
   const db = await getDb();
   await db.execute({
     sql: `UPDATE leads SET
-            status = ?, comment = ?,
+            status = ?, comment = ?, channel = ?,
             generated_message = ?, email_subject = ?, email_body = ?,
             generated_message_original = ?, email_subject_original = ?, email_body_original = ?,
             pending_edit_fields = ?,
@@ -489,6 +506,7 @@ export async function updateLead(
     args: [
       status,
       comment,
+      channel,
       current.generated_message,
       current.email_subject,
       current.email_body,

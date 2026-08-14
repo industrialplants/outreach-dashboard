@@ -7,7 +7,8 @@ export type LeadStatus =
   | "rejected"
   | "sent"
   | "replied"
-  | "call_booked";
+  | "call_booked"
+  | "dnd";
 
 // German labels shown in the UI, in the funnel order the user specified.
 export const STATUS_LABELS: Record<LeadStatus, string> = {
@@ -18,6 +19,7 @@ export const STATUS_LABELS: Record<LeadStatus, string> = {
   sent: "Gesendet",
   replied: "Geantwortet",
   call_booked: "Call gebucht",
+  dnd: "Absage / DND",
 };
 
 export const STATUS_ORDER: LeadStatus[] = [
@@ -28,7 +30,14 @@ export const STATUS_ORDER: LeadStatus[] = [
   "sent",
   "replied",
   "call_booked",
+  "dnd",
 ];
+
+// Which channel(s) a lead is actually meant to be contacted through. Set by
+// Clay depending on which target-group table/campaign the row came from.
+// "both" is also the default for all pre-existing leads (no prior campaign
+// segmentation existed, so nothing should suddenly become restricted).
+export type LeadChannel = "linkedin" | "email" | "both";
 
 export interface Lead {
   id: number;
@@ -45,6 +54,7 @@ export interface Lead {
   signal: string;
   status: LeadStatus;
   comment: string;
+  channel: LeadChannel; // which channel(s) this lead is meant to be contacted through
   dm_sent_at: string; // ISO 8601, empty string = not yet sent via LinkedIn DM
   email_sent_at: string; // ISO 8601, empty string = not yet sent via email
   // Customer-edit tracking: when a client edits a field, its pre-edit value
@@ -107,4 +117,5 @@ export interface WebhookPayload {
   research_summary?: string;
   signal?: string;
   client_token?: string;
+  channel?: string; // "linkedin" | "email" | "both" — defaults to "both" if omitted/unrecognized
 }

@@ -61,6 +61,7 @@ async function migrate(db: Client): Promise<void> {
       email_subject_original     TEXT NOT NULL DEFAULT '',
       email_body_original        TEXT NOT NULL DEFAULT '',
       pending_edit_fields         TEXT NOT NULL DEFAULT '',
+      channel           TEXT NOT NULL DEFAULT 'both',
       created_at        TEXT NOT NULL,
       updated_at        TEXT NOT NULL,
       FOREIGN KEY (client_token) REFERENCES clients(token)
@@ -118,6 +119,11 @@ async function migrate(db: Client): Promise<void> {
   if (!existing.has("pending_edit_fields")) {
     await db.execute(
       "ALTER TABLE leads ADD COLUMN pending_edit_fields TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (!existing.has("channel")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN channel TEXT NOT NULL DEFAULT 'both'",
     );
   }
 
