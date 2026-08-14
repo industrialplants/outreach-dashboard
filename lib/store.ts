@@ -266,6 +266,17 @@ export async function getLead(id: number): Promise<Lead | undefined> {
   return rs.rows[0] ? mapLead(rs.rows[0]) : undefined;
 }
 
+// Clay's email-finder tools often prefix the address with a verification
+// marker, e.g. "✅ name@firma.de" instead of a clean address. Pull out just
+// the actual email so it's always usable as a real recipient address —
+// everywhere (Graph sendMail, mailto links, dedup) benefits from this being
+// clean at the source rather than needing to sanitize it at every call site.
+function extractEmail(raw: string | undefined): string {
+  if (!raw) return "";
+  const match = raw.match(/[^\s<>()]+@[^\s<>()]+\.[^\s<>()]+/);
+  return match ? match[0].replace(/[.,;:]+$/, "") : "";
+}
+
 // Clay sends channel as free text; anything unrecognized safely falls back
 // to "both" rather than silently blocking a lead from every channel. Trimmed
 // and lower-cased so "LinkedIn", " linkedin ", etc. all still match.
@@ -295,7 +306,7 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
       company: payload.company ?? "",
       title: payload.title ?? "",
       linkedin_url: payload.linkedin_url ?? "",
-      email: payload.email ?? "",
+      email: extractEmail(payload.email),
       generated_message: payload.generated_message ?? "",
       email_subject: payload.email_subject ?? "",
       email_body: payload.email_body ?? "",
@@ -364,7 +375,7 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
       company: payload.company ?? "",
       title: payload.title ?? "",
       linkedin_url: linkedin,
-      email: payload.email ?? "",
+      email: extractEmail(payload.email),
       generated_message: payload.generated_message ?? "",
       email_subject: payload.email_subject ?? "",
       email_body: payload.email_body ?? "",
@@ -431,7 +442,7 @@ export async function updateLead(
     changes.comment !== undefined ? changes.comment : existing.comment;
   const channel =
     changes.channel !== undefined ? normalizeChannel(changes.channel) : existing.channel;
-  const email = changes.email !== undefined ? changes.email.trim() : existing.email;
+  const email = changes.email !== undefined ? extractEmail(changes.email) : existing.email;
   const dm_sent_at =
     changes.dm_sent_at !== undefined ? changes.dm_sent_at : existing.dm_sent_at;
   const email_sent_at =
