@@ -857,6 +857,11 @@ code {
   flex-wrap: wrap;
 }
 
+.diff-note-wrap {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
 /* ---------- Per-client login editor (Kunden tab) ---------- */
 
 .creds-editor {

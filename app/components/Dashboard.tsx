@@ -394,10 +394,9 @@ function DiffView({ current, original }: { current: string; original: string }) 
 }
 
 // Shown under a field that has an unreviewed customer edit. Clients just see
-// a note; admins get the actual diff plus review actions (keep the new
-// wording, or throw it away and restore what the AI originally generated).
-// This is deliberately visually separate from the main text above it — the
-// main text is always the literal current value, nothing struck through.
+// a note; admins get a collapsed toggle (diff hidden by default, so the card
+// never looks like it's showing two messages at once) plus review actions
+// that work immediately without needing to expand anything first.
 function PendingEditNote({
   fieldKey,
   current,
@@ -416,6 +415,8 @@ function PendingEditNote({
   ) => void;
   leadId: number;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   if (!isAdmin) {
     return (
       <div className="diff-note">
@@ -424,15 +425,15 @@ function PendingEditNote({
     );
   }
   return (
-    <div className="diff-review">
-      <div className="diff-review-label">
-        ✏️ Vom Kunden bearbeitet — Vergleich zum KI-Original (nur zur Info,
-        oben steht bereits der aktuelle Text):
-      </div>
-      <p className="diff-review-text">
-        <DiffView current={current} original={original} />
-      </p>
+    <div className="diff-note-wrap">
       <div className="diff-note-admin">
+        <button
+          type="button"
+          className="btn ghost small"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Alte Nachricht ausblenden ▲" : "⏳ Vom Kunden bearbeitet — alte Nachricht ▼"}
+        </button>
         <button
           className="btn small"
           onClick={() => onMutate(leadId, { accept_fields: [fieldKey] })}
@@ -446,6 +447,14 @@ function PendingEditNote({
           Original wiederherstellen
         </button>
       </div>
+      {expanded && (
+        <div className="diff-review">
+          <div className="diff-review-label">Vergleich zum KI-Original:</div>
+          <p className="diff-review-text">
+            <DiffView current={current} original={original} />
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -644,6 +653,16 @@ function LeadCard({
           <div className="comment-box edit-box">
             <label className="field">
               <span>LinkedIn-Nachricht</span>
+              {pendingFields.has("generated_message") && (
+                <PendingEditNote
+                  fieldKey="generated_message"
+                  current={lead.generated_message}
+                  original={lead.generated_message_original}
+                  isAdmin={isAdmin}
+                  onMutate={onMutate}
+                  leadId={lead.id}
+                />
+              )}
               <textarea
                 value={editMessage}
                 onChange={(e) => setEditMessage(e.target.value)}
@@ -653,6 +672,16 @@ function LeadCard({
             </label>
             <label className="field">
               <span>E-Mail-Betreff</span>
+              {pendingFields.has("email_subject") && (
+                <PendingEditNote
+                  fieldKey="email_subject"
+                  current={lead.email_subject}
+                  original={lead.email_subject_original}
+                  isAdmin={isAdmin}
+                  onMutate={onMutate}
+                  leadId={lead.id}
+                />
+              )}
               <input
                 type="text"
                 value={editSubject}
@@ -662,6 +691,16 @@ function LeadCard({
             </label>
             <label className="field">
               <span>E-Mail-Text</span>
+              {pendingFields.has("email_body") && (
+                <PendingEditNote
+                  fieldKey="email_body"
+                  current={lead.email_body}
+                  original={lead.email_body_original}
+                  isAdmin={isAdmin}
+                  onMutate={onMutate}
+                  leadId={lead.id}
+                />
+              )}
               <textarea
                 value={editBody}
                 onChange={(e) => setEditBody(e.target.value)}
