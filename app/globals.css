@@ -232,6 +232,23 @@ code {
 
 /* ---------- KPIs ---------- */
 
+.send-preview {
+  margin-bottom: 16px;
+}
+.send-preview-body {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.send-preview-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
 .kpis {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

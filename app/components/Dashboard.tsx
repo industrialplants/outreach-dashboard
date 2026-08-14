@@ -84,6 +84,11 @@ export default function Dashboard({
   const [leadFilter, setLeadFilter] = useState<LeadFilter>("all");
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
   const [isPending, startTransition] = useTransition();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<
+    { active: boolean; leads: { id: number; name: string; company: string; email: string }[] } | null
+  >(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editMessage, setEditMessage] = useState("");
 
@@ -92,6 +97,26 @@ export default function Dashboard({
 
   function switchClient(clientToken: string) {
     router.push(`/?token=${encodeURIComponent(adminToken!)}&client=${encodeURIComponent(clientToken)}`);
+  }
+
+  async function togglePreview() {
+    if (previewOpen) {
+      setPreviewOpen(false);
+      return;
+    }
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    try {
+      const params = new URLSearchParams({ token: authToken });
+      if (role === "admin" && selected) params.set("client", selected.token);
+      const res = await fetch(`/api/send-preview?${params.toString()}`);
+      const data = await res.json();
+      setPreviewData(data);
+    } catch {
+      setPreviewData({ active: false, leads: [] });
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   async function mutate(
@@ -236,6 +261,47 @@ export default function Dashboard({
         </section>
       ) : tab === "leads" ? (
         <>
+          <div className="send-preview">
+            <button className="btn ghost small" onClick={togglePreview}>
+              {previewOpen
+                ? "Vorschau ausblenden ▲"
+                : "📬 Wer bekommt als Nächstes eine E-Mail? ▼"}
+            </button>
+            {previewOpen && (
+              <div className="send-preview-body">
+                {previewLoading ? (
+                  <p className="muted">Lädt…</p>
+                ) : !previewData?.active ? (
+                  <p className="muted">
+                    Automatischer E-Mail-Versand ist für dieses Board aktuell
+                    nicht aktiv.
+                  </p>
+                ) : previewData.leads.length === 0 ? (
+                  <p className="muted">
+                    Aktuell steht niemand in der Warteschlange für den
+                    nächsten automatischen Versand.
+                  </p>
+                ) : (
+                  <>
+                    <p className="muted" style={{ margin: "0 0 8px" }}>
+                      Diese {previewData.leads.length} bekommen beim nächsten
+                      Durchlauf als Erstes eine E-Mail (älteste zuerst):
+                    </p>
+                    <ul className="send-preview-list">
+                      {previewData.leads.map((l) => (
+                        <li key={l.id}>
+                          <strong>{l.name}</strong>
+                          {l.company && <> — {l.company}</>}
+                          {" "}
+                          <span className="muted">{l.email}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           {kpis && <KpiRow kpis={kpis} />}
           <nav className="channel-filters">
             {CHANNEL_FILTERS.map((f) => {
