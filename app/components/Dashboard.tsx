@@ -132,6 +132,7 @@ export default function Dashboard({
       dm_sent_at?: string;
       email_sent_at?: string;
       channel?: string;
+      email?: string;
     },
   ) {
     const res = await fetch(`/api/leads/${id}`, {
@@ -404,6 +405,7 @@ function LeadList({
       dm_sent_at?: string;
       email_sent_at?: string;
       channel?: string;
+      email?: string;
     },
   ) => void;
   onDelete?: (id: number) => void;
@@ -545,6 +547,7 @@ function LeadCard({
       dm_sent_at?: string;
       email_sent_at?: string;
       channel?: string;
+      email?: string;
     },
   ) => void;
   onDelete?: (id: number) => void;
@@ -557,6 +560,8 @@ function LeadCard({
   const [editMessage, setEditMessage] = useState(lead.generated_message || "");
   const [editSubject, setEditSubject] = useState(lead.email_subject || "");
   const [editBody, setEditBody] = useState(lead.email_body || "");
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [emailValue, setEmailValue] = useState(lead.email || "");
 
   const pendingFields = new Set(
     lead.pending_edit_fields ? lead.pending_edit_fields.split(",") : [],
@@ -933,10 +938,61 @@ function LeadCard({
             </div>
           )}
           <div className="detail-meta">
-            {lead.email && (
-              <span>
-                ✉ <a href={`mailto:${lead.email}`}>{lead.email}</a>
-              </span>
+            {isAdmin ? (
+              editingEmail ? (
+                <span className="email-editor">
+                  <input
+                    type="email"
+                    value={emailValue}
+                    onChange={(e) => setEmailValue(e.target.value)}
+                    placeholder="kontakt@firma.de"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => {
+                      onMutate(lead.id, { email: emailValue.trim() });
+                      setEditingEmail(false);
+                    }}
+                  >
+                    Speichern
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost small"
+                    onClick={() => {
+                      setEmailValue(lead.email || "");
+                      setEditingEmail(false);
+                    }}
+                  >
+                    Abbrechen
+                  </button>
+                </span>
+              ) : (
+                <span>
+                  {lead.email ? (
+                    <>
+                      ✉ <a href={`mailto:${lead.email}`}>{lead.email}</a>
+                    </>
+                  ) : (
+                    <span className="muted">Keine E-Mail-Adresse hinterlegt</span>
+                  )}{" "}
+                  <button
+                    type="button"
+                    className="btn ghost small"
+                    onClick={() => setEditingEmail(true)}
+                  >
+                    {lead.email ? "Ändern" : "Hinzufügen"}
+                  </button>
+                </span>
+              )
+            ) : (
+              lead.email && (
+                <span>
+                  ✉ <a href={`mailto:${lead.email}`}>{lead.email}</a>
+                </span>
+              )
             )}
             {lead.linkedin_url && (
               <span>

@@ -19,6 +19,7 @@ interface PatchBody {
   dm_sent_at?: string;
   email_sent_at?: string;
   channel?: string; // admin-only: reassigns which channel(s) a lead is meant for
+  email?: string; // admin-only: corrects/adds the contact email address
   token?: string; // caller's board token, used to authorize the change
 }
 
@@ -85,6 +86,9 @@ export async function PATCH(
     // reassigning the channel must never touch the message text or its
     // review status, only which channel(s) the lead is eligible for.
     channel: isAdmin ? body.channel : undefined,
+    // Admin-only: correcting/adding the contact email address for leads that
+    // were originally sourced without one (e.g. a LinkedIn-only campaign).
+    email: isAdmin ? body.email : undefined,
   });
 
   return NextResponse.json({ ok: true, lead: updated });

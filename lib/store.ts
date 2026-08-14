@@ -418,6 +418,9 @@ export async function updateLead(
     // Reassigns which channel(s) a lead is eligible for. Deliberately its own
     // independent field — never touches text, status, or review markers.
     channel?: string;
+    // Corrects/adds the contact email address. Same principle: independent
+    // of everything else, admin-only, no side effects on text or status.
+    email?: string;
   },
 ): Promise<Lead | undefined> {
   const existing = await getLead(id);
@@ -428,6 +431,7 @@ export async function updateLead(
     changes.comment !== undefined ? changes.comment : existing.comment;
   const channel =
     changes.channel !== undefined ? normalizeChannel(changes.channel) : existing.channel;
+  const email = changes.email !== undefined ? changes.email.trim() : existing.email;
   const dm_sent_at =
     changes.dm_sent_at !== undefined ? changes.dm_sent_at : existing.dm_sent_at;
   const email_sent_at =
@@ -496,7 +500,7 @@ export async function updateLead(
   const db = await getDb();
   await db.execute({
     sql: `UPDATE leads SET
-            status = ?, comment = ?, channel = ?,
+            status = ?, comment = ?, channel = ?, email = ?,
             generated_message = ?, email_subject = ?, email_body = ?,
             generated_message_original = ?, email_subject_original = ?, email_body_original = ?,
             pending_edit_fields = ?,
@@ -507,6 +511,7 @@ export async function updateLead(
       status,
       comment,
       channel,
+      email,
       current.generated_message,
       current.email_subject,
       current.email_body,
