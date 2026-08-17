@@ -3,10 +3,11 @@ import { ADMIN_TOKEN } from "@/lib/db";
 import { listSendableEmails, updateLead } from "@/lib/store";
 import { sendMailViaGraph } from "@/lib/graphMail";
 
-// How many emails to send per run — deliberately small. This runs every 15
-// minutes (Vercel Pro cron), so a modest batch size avoids ever sending a
-// big burst at once; the queue just gets worked through steadily.
-const BATCH_SIZE = 10;
+// Exactly one email per run — spread naturally across the Mon-Wed 7-18
+// window (one every 15 minutes) instead of a burst of up to 10 within a
+// single minute, which reads as automated/spammy to receiving mail servers
+// and risks deliverability. Decided with the client 14.08.2026.
+const BATCH_SIZE = 1;
 
 // Automated sends only happen Mon–Wed, 7:00–18:00 German time — matches the
 // CTA wording ("Hast du diese Woche 20 Minuten?"), decided with the client
