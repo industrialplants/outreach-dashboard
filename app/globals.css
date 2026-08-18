@@ -296,6 +296,11 @@ code {
   padding: 16px;
 }
 
+.lead.lead-dnd {
+  background: #2a1015;
+  border-color: rgba(255, 90, 106, 0.5);
+}
+
 .lead-head {
   display: flex;
   align-items: flex-start;
@@ -442,8 +447,20 @@ code {
 }
 
 .btn.approve {
-  border-color: rgba(47, 212, 122, 0.5);
+  border-color: var(--green);
+  background: var(--green);
+  color: #0b1a10;
+  font-weight: 600;
+}
+.btn.approve:hover {
+  filter: brightness(1.08);
+}
+.btn.approve:disabled {
+  background: transparent;
+  border-color: rgba(47, 212, 122, 0.4);
   color: var(--green);
+  opacity: 0.85;
+  font-weight: 400;
 }
 .btn.reject {
   border-color: rgba(255, 90, 106, 0.5);
@@ -454,12 +471,19 @@ code {
   color: var(--amber);
 }
 .btn.dnd {
-  border-color: rgba(255, 90, 106, 0.6);
-  background: #4a1420;
-  color: #ffb3bd;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
 }
 .btn.dnd:hover {
   border-color: var(--red);
+  color: var(--red);
+}
+.btn.dnd:disabled {
+  border-color: rgba(255, 90, 106, 0.6);
+  background: rgba(255, 90, 106, 0.14);
+  color: #ffb3bd;
+  opacity: 1;
 }
 .btn.pause {
   border-color: rgba(245, 181, 68, 0.6);

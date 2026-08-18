@@ -585,13 +585,11 @@ function LeadCard({
     lead.pending_edit_fields ? lead.pending_edit_fields.split(",") : [],
   );
 
-  // Clay always generates both texts regardless of campaign — so a
-  // LinkedIn-only lead still has an email_body sitting in the database.
-  // These decide whether that content (and its approve/send controls) is
-  // even shown, so it can never be reviewed/approved/sent by accident for a
-  // channel it was never meant for. Once a channel has real history
-  // (approved or sent), it stays visible even if the channel setting is
-  // narrowed later — history is never hidden, only future potential is.
+  // Mirrors the channel setting, but never hides a channel that already has
+  // real history (approved or sent) — narrowing the channel afterward must
+  // not make an already-sent email disappear from view. Decided 18.08.2026
+  // (reconsidered the same day: an earlier, stricter version hid sent
+  // history too, which turned out to be the wrong tradeoff).
   const showLinkedIn =
     lead.channel === "linkedin" ||
     lead.channel === "both" ||
@@ -604,7 +602,7 @@ function LeadCard({
     !!lead.email_approved_at;
 
   return (
-    <article className="lead">
+    <article className={lead.status === "dnd" ? "lead lead-dnd" : "lead"}>
       <div className="lead-head">
         <div className="lead-who">
           <div className="lead-name">{lead.name || "—"}</div>
@@ -958,22 +956,18 @@ function LeadCard({
                   <span className="pending-badge"> · ⏳ Änderung wartet auf Review</span>
                 )}
               </div>
-              {(lead.email_subject || pendingFields.has("email_subject")) && (
-                <>
-                  <p className="email-subject">
-                    <strong>Betreff:</strong> {lead.email_subject || "—"}
-                  </p>
-                  {pendingFields.has("email_subject") && (
-                    <PendingEditNote
-                      fieldKey="email_subject"
-                      current={lead.email_subject}
-                      original={lead.email_subject_original}
-                      isAdmin={isAdmin}
-                      onMutate={onMutate}
-                      leadId={lead.id}
-                    />
-                  )}
-                </>
+              <p className="email-subject">
+                <strong>Betreff:</strong> {lead.email_subject || "—"}
+              </p>
+              {pendingFields.has("email_subject") && (
+                <PendingEditNote
+                  fieldKey="email_subject"
+                  current={lead.email_subject}
+                  original={lead.email_subject_original}
+                  isAdmin={isAdmin}
+                  onMutate={onMutate}
+                  leadId={lead.id}
+                />
               )}
               <p className="message">{lead.email_body || "—"}</p>
               {pendingFields.has("email_body") && (
