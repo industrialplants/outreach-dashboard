@@ -461,6 +461,26 @@ code {
 .btn.dnd:hover {
   border-color: var(--red);
 }
+.btn.pause {
+  border-color: rgba(245, 181, 68, 0.6);
+  color: var(--amber);
+}
+.btn.pause.active {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #0e0d0d;
+  font-weight: 600;
+}
+.pause-banner {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(245, 181, 68, 0.14);
+  border: 1px solid rgba(245, 181, 68, 0.4);
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 600;
+}
 .btn.ghost {
   background: transparent;
   color: var(--muted-2);

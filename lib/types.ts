@@ -55,6 +55,14 @@ export interface Lead {
   status: LeadStatus;
   comment: string;
   channel: LeadChannel; // which channel(s) this lead is meant to be contacted through
+  send_paused_at: string; // ISO 8601, non-empty = emergency stop is active — blocks all sending
+  // Separate, independent approval per channel — approving one never implies
+  // the other. Cleared automatically the moment the corresponding text
+  // changes (edit, accept, or revert), so an approval always matches the
+  // exact text it was granted for. Decided 18.08.2026 after an email went
+  // out that had only ever been reviewed on the LinkedIn side.
+  linkedin_approved_at: string;
+  email_approved_at: string;
   dm_sent_at: string; // ISO 8601, empty string = not yet sent via LinkedIn DM
   email_sent_at: string; // ISO 8601, empty string = not yet sent via email
   // Customer-edit tracking: when a client edits a field, its pre-edit value

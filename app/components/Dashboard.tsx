@@ -38,6 +38,18 @@ type LeadFilter =
   | "call_booked"
   | "dnd";
 
+// e.g. "18.08. 14:32" — German date/time, Berlin timezone, no year (recent
+// enough that omitting it keeps buttons/labels short and readable).
+function formatDe(iso: string): string {
+  return new Intl.DateTimeFormat("de-DE", {
+    timeZone: "Europe/Berlin",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
 const LEAD_FILTERS: { key: LeadFilter; label: string }[] = [
   { key: "all", label: "Alle" },
   { key: "new", label: "Neu" },
@@ -133,6 +145,8 @@ export default function Dashboard({
       email_sent_at?: string;
       channel?: string;
       email?: string;
+      paused?: boolean;
+      approve_channel?: "linkedin" | "email";
     },
   ) {
     const res = await fetch(`/api/leads/${id}`, {
@@ -406,6 +420,8 @@ function LeadList({
       email_sent_at?: string;
       channel?: string;
       email?: string;
+      paused?: boolean;
+      approve_channel?: "linkedin" | "email";
     },
   ) => void;
   onDelete?: (id: number) => void;
@@ -548,6 +564,8 @@ function LeadCard({
       email_sent_at?: string;
       channel?: string;
       email?: string;
+      paused?: boolean;
+      approve_channel?: "linkedin" | "email";
     },
   ) => void;
   onDelete?: (id: number) => void;
@@ -566,6 +584,24 @@ function LeadCard({
   const pendingFields = new Set(
     lead.pending_edit_fields ? lead.pending_edit_fields.split(",") : [],
   );
+
+  // Clay always generates both texts regardless of campaign — so a
+  // LinkedIn-only lead still has an email_body sitting in the database.
+  // These decide whether that content (and its approve/send controls) is
+  // even shown, so it can never be reviewed/approved/sent by accident for a
+  // channel it was never meant for. Once a channel has real history
+  // (approved or sent), it stays visible even if the channel setting is
+  // narrowed later — history is never hidden, only future potential is.
+  const showLinkedIn =
+    lead.channel === "linkedin" ||
+    lead.channel === "both" ||
+    !!lead.dm_sent_at ||
+    !!lead.linkedin_approved_at;
+  const showEmail =
+    lead.channel === "email" ||
+    lead.channel === "both" ||
+    !!lead.email_sent_at ||
+    !!lead.email_approved_at;
 
   return (
     <article className="lead">
@@ -615,25 +651,57 @@ function LeadCard({
             }
             aria-label="Status ändern"
           >
-            {STATUS_ORDER.map((s) => (
+            {STATUS_ORDER.filter((s) => s !== "approved").map((s) => (
               <option key={s} value={s}>
                 {STATUS_LABELS[s]}
               </option>
             ))}
+            {lead.status === "approved" && (
+              <option value="approved">{STATUS_LABELS.approved}</option>
+            )}
           </select>
         </div>
       </div>
 
       {lead.signal && <div className="signal">⚡ {lead.signal}</div>}
 
+      {lead.send_paused_at && (
+        <div className="pause-banner">
+          ⏸ Versand angehalten — es geht nichts raus, bis der Halt aufgehoben wird.
+        </div>
+      )}
+
       <div className="lead-actions">
         <button
-          className="btn approve"
-          onClick={() => onMutate(lead.id, { status: "approved" })}
-          disabled={lead.status === "approved"}
+          className={lead.send_paused_at ? "btn pause active" : "btn pause"}
+          onClick={() => onMutate(lead.id, { paused: !lead.send_paused_at })}
         >
-          Freigeben
+          {lead.send_paused_at ? "▶ Versand fortsetzen" : "⏸ Versand anhalten"}
         </button>
+        {showLinkedIn && (
+          <button
+            className="btn approve"
+            onClick={() => onMutate(lead.id, { approve_channel: "linkedin" })}
+            disabled={!!lead.linkedin_approved_at || !!lead.send_paused_at}
+            title="Gibt ausschließlich die LinkedIn-Nachricht frei — die E-Mail bleibt davon unberührt"
+          >
+            {lead.linkedin_approved_at
+              ? `✓ LinkedIn freigegeben (${formatDe(lead.linkedin_approved_at)})`
+              : "LinkedIn freigeben"}
+          </button>
+        )}
+        {showEmail && (
+          <button
+            className="btn approve"
+            onClick={() => onMutate(lead.id, { approve_channel: "email" })}
+            disabled={!!lead.email_approved_at || !!lead.send_paused_at}
+            title="Gibt ausschließlich die E-Mail frei — die LinkedIn-Nachricht bleibt davon unberührt"
+          >
+            {lead.email_approved_at
+              ? `✓ E-Mail freigegeben (${formatDe(lead.email_approved_at)})`
+              : "E-Mail freigeben"}
+          </button>
+        )}
         <button
           className="btn reject"
           onClick={() => onMutate(lead.id, { status: "rejected" })}
@@ -656,41 +724,50 @@ function LeadCard({
         >
           {lead.status === "dnd" ? "✓ Absage / DND" : "Absage / DND"}
         </button>
-        {lead.status !== "new" &&
-          lead.status !== "revised" &&
-          lead.status !== "rejected" &&
-          lead.status !== "dnd" && (
-            <>
-              {(lead.channel === "linkedin" || lead.channel === "both") && (
-                <button
-                  className="btn sent"
-                  onClick={() =>
-                    onMutate(lead.id, {
-                      status: "sent",
-                      dm_sent_at: new Date().toISOString(),
-                    })
-                  }
-                  disabled={!!lead.dm_sent_at}
-                >
-                  {lead.dm_sent_at ? "✓ DM gesendet" : "DM gesendet"}
-                </button>
-              )}
-              {(lead.channel === "email" || lead.channel === "both") && (
-                <button
-                  className="btn sent"
-                  onClick={() =>
-                    onMutate(lead.id, {
-                      status: "sent",
-                      email_sent_at: new Date().toISOString(),
-                    })
-                  }
-                  disabled={!!lead.email_sent_at}
-                >
-                  {lead.email_sent_at ? "✓ E-Mail gesendet" : "E-Mail gesendet"}
-                </button>
-              )}
-            </>
-          )}
+        {lead.status !== "rejected" && lead.status !== "dnd" && (
+          <>
+            {showLinkedIn && (
+              <button
+                className="btn sent"
+                onClick={() =>
+                  onMutate(lead.id, {
+                    dm_sent_at: new Date().toISOString(),
+                  })
+                }
+                disabled={
+                  !!lead.dm_sent_at || !!lead.send_paused_at || !lead.linkedin_approved_at
+                }
+                title={
+                  !lead.linkedin_approved_at && !lead.dm_sent_at
+                    ? "Erst 'LinkedIn freigeben' klicken"
+                    : undefined
+                }
+              >
+                {lead.dm_sent_at ? `✓ DM gesendet (${formatDe(lead.dm_sent_at)})` : "DM gesendet"}
+              </button>
+            )}
+            {showEmail && (
+              <button
+                className="btn sent"
+                onClick={() =>
+                  onMutate(lead.id, {
+                    email_sent_at: new Date().toISOString(),
+                  })
+                }
+                disabled={
+                  !!lead.email_sent_at || !!lead.send_paused_at || !lead.email_approved_at
+                }
+                title={
+                  !lead.email_approved_at && !lead.email_sent_at
+                    ? "Erst 'E-Mail freigeben' klicken"
+                    : undefined
+                }
+              >
+                {lead.email_sent_at ? `✓ E-Mail gesendet (${formatDe(lead.email_sent_at)})` : "E-Mail gesendet"}
+              </button>
+            )}
+          </>
+        )}
         <button className="btn ghost" onClick={() => setShowComment((v) => !v)}>
           Kommentar
         </button>
@@ -722,63 +799,74 @@ function LeadCard({
 
       {isEditing && (
           <div className="comment-box edit-box">
-            <label className="field">
-              <span>LinkedIn-Nachricht</span>
-              {pendingFields.has("generated_message") && (
-                <PendingEditNote
-                  fieldKey="generated_message"
-                  current={lead.generated_message}
-                  original={lead.generated_message_original}
-                  isAdmin={isAdmin}
-                  onMutate={onMutate}
-                  leadId={lead.id}
+            {showLinkedIn && (
+              <label className="field">
+                <span>LinkedIn-Nachricht</span>
+                {pendingFields.has("generated_message") && (
+                  <PendingEditNote
+                    fieldKey="generated_message"
+                    current={lead.generated_message}
+                    original={lead.generated_message_original}
+                    isAdmin={isAdmin}
+                    onMutate={onMutate}
+                    leadId={lead.id}
+                  />
+                )}
+                <textarea
+                  value={editMessage}
+                  onChange={(e) => setEditMessage(e.target.value)}
+                  rows={5}
+                  style={{ width: "100%", resize: "vertical" }}
                 />
-              )}
-              <textarea
-                value={editMessage}
-                onChange={(e) => setEditMessage(e.target.value)}
-                rows={5}
-                style={{ width: "100%", resize: "vertical" }}
-              />
-            </label>
-            <label className="field">
-              <span>E-Mail-Betreff</span>
-              {pendingFields.has("email_subject") && (
-                <PendingEditNote
-                  fieldKey="email_subject"
-                  current={lead.email_subject}
-                  original={lead.email_subject_original}
-                  isAdmin={isAdmin}
-                  onMutate={onMutate}
-                  leadId={lead.id}
-                />
-              )}
-              <input
-                type="text"
-                value={editSubject}
-                onChange={(e) => setEditSubject(e.target.value)}
-                style={{ width: "100%" }}
-              />
-            </label>
-            <label className="field">
-              <span>E-Mail-Text</span>
-              {pendingFields.has("email_body") && (
-                <PendingEditNote
-                  fieldKey="email_body"
-                  current={lead.email_body}
-                  original={lead.email_body_original}
-                  isAdmin={isAdmin}
-                  onMutate={onMutate}
-                  leadId={lead.id}
-                />
-              )}
-              <textarea
-                value={editBody}
-                onChange={(e) => setEditBody(e.target.value)}
-                rows={5}
-                style={{ width: "100%", resize: "vertical" }}
-              />
-            </label>
+              </label>
+            )}
+            {showEmail && (
+              <>
+                <label className="field">
+                  <span>E-Mail-Betreff</span>
+                  {pendingFields.has("email_subject") && (
+                    <PendingEditNote
+                      fieldKey="email_subject"
+                      current={lead.email_subject}
+                      original={lead.email_subject_original}
+                      isAdmin={isAdmin}
+                      onMutate={onMutate}
+                      leadId={lead.id}
+                    />
+                  )}
+                  <input
+                    type="text"
+                    value={editSubject}
+                    onChange={(e) => setEditSubject(e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+                <label className="field">
+                  <span>E-Mail-Text</span>
+                  {pendingFields.has("email_body") && (
+                    <PendingEditNote
+                      fieldKey="email_body"
+                      current={lead.email_body}
+                      original={lead.email_body_original}
+                      isAdmin={isAdmin}
+                      onMutate={onMutate}
+                      leadId={lead.id}
+                    />
+                  )}
+                  <textarea
+                    value={editBody}
+                    onChange={(e) => setEditBody(e.target.value)}
+                    rows={5}
+                    style={{ width: "100%", resize: "vertical" }}
+                  />
+                </label>
+              </>
+            )}
+            <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
+              Speichern setzt den Status auf "Überarbeitet" zurück. Die
+              Freigabe pro Kanal ist danach immer ein eigener, bewusster
+              Klick in der Aktionsleiste — kein kombinierter Schritt mehr.
+            </p>
             <div className="comment-actions">
               <button
                 className="btn small"
@@ -788,13 +876,13 @@ function LeadCard({
                     email_subject?: string;
                     email_body?: string;
                   } = {};
-                  if (editMessage !== (lead.generated_message || "")) {
+                  if (showLinkedIn && editMessage !== (lead.generated_message || "")) {
                     changes.generated_message = editMessage;
                   }
-                  if (editSubject !== (lead.email_subject || "")) {
+                  if (showEmail && editSubject !== (lead.email_subject || "")) {
                     changes.email_subject = editSubject;
                   }
-                  if (editBody !== (lead.email_body || "")) {
+                  if (showEmail && editBody !== (lead.email_body || "")) {
                     changes.email_body = editBody;
                   }
                   await onMutate(lead.id, changes);
@@ -802,36 +890,6 @@ function LeadCard({
                 }}
               >
                 Speichern
-              </button>
-              <button
-                className="btn small approve"
-                onClick={async () => {
-                  const changes: {
-                    generated_message?: string;
-                    email_subject?: string;
-                    email_body?: string;
-                  } = {};
-                  if (editMessage !== (lead.generated_message || "")) {
-                    changes.generated_message = editMessage;
-                  }
-                  if (editSubject !== (lead.email_subject || "")) {
-                    changes.email_subject = editSubject;
-                  }
-                  if (editBody !== (lead.email_body || "")) {
-                    changes.email_body = editBody;
-                  }
-                  // Saving an edited message always resets status to
-                  // "Überarbeitet" server-side (by design, so raw edits get a
-                  // second look) — so approving has to be a separate,
-                  // follow-up call, not bundled into the same request.
-                  if (Object.keys(changes).length > 0) {
-                    await onMutate(lead.id, changes);
-                  }
-                  await onMutate(lead.id, { status: "approved" });
-                  setIsEditing(false);
-                }}
-              >
-                Speichern &amp; Freigeben
               </button>
               <button
                 className="btn ghost"
@@ -870,29 +928,28 @@ function LeadCard({
 
       {open && (
         <div className="lead-detail">
-          <div className="detail-block">
-            <div className="detail-label">
-              Generierte Nachricht (LinkedIn)
+          {showLinkedIn && (
+            <div className="detail-block">
+              <div className="detail-label">
+                Generierte Nachricht (LinkedIn)
+                {pendingFields.has("generated_message") && (
+                  <span className="pending-badge"> · ⏳ Änderung wartet auf Review</span>
+                )}
+              </div>
+              <p className="message">{lead.generated_message || "—"}</p>
               {pendingFields.has("generated_message") && (
-                <span className="pending-badge"> · ⏳ Änderung wartet auf Review</span>
+                <PendingEditNote
+                  fieldKey="generated_message"
+                  current={lead.generated_message}
+                  original={lead.generated_message_original}
+                  isAdmin={isAdmin}
+                  onMutate={onMutate}
+                  leadId={lead.id}
+                />
               )}
             </div>
-            <p className="message">{lead.generated_message || "—"}</p>
-            {pendingFields.has("generated_message") && (
-              <PendingEditNote
-                fieldKey="generated_message"
-                current={lead.generated_message}
-                original={lead.generated_message_original}
-                isAdmin={isAdmin}
-                onMutate={onMutate}
-                leadId={lead.id}
-              />
-            )}
-          </div>
-          {(lead.email_subject ||
-            lead.email_body ||
-            pendingFields.has("email_subject") ||
-            pendingFields.has("email_body")) && (
+          )}
+          {showEmail && (
             <div className="detail-block">
               <div className="detail-label">
                 Generierte E-Mail

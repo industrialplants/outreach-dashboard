@@ -45,6 +45,9 @@ function mapLead(r: Row): Lead {
     status: String(r.status) as LeadStatus,
     comment: String(r.comment),
     channel: (String(r.channel) || "both") as LeadChannel,
+    send_paused_at: String(r.send_paused_at),
+    linkedin_approved_at: String(r.linkedin_approved_at),
+    email_approved_at: String(r.email_approved_at),
     dm_sent_at: String(r.dm_sent_at),
     email_sent_at: String(r.email_sent_at),
     generated_message_original: String(r.generated_message_original),
@@ -218,23 +221,12 @@ export async function listLeads(clientToken: string): Promise<Lead[]> {
 }
 
 
-// Leads that are approved, have an email drafted, and haven't been sent by
-// email yet — the queue for the automated Microsoft Graph send job.
-// The pending_edit_fields check below is now mostly a defensive backstop:
-// since 13.08.2026, approving a lead (status='approved') auto-clears any
-// pending customer-edit marker (decided with the client — "Freigeben" alone
-// is the trust signal now, no separate manual review step). This condition
-// should therefore rarely if ever exclude anything in practice.
-// Leads that are approved, have an email drafted, and haven't been sent by
-// email yet — the queue for the automated Microsoft Graph send job.
-// Status can be 'approved' (nothing sent yet) OR 'sent' (the DM side already
-// went out — multi-channel leads move to 'sent' after their first channel,
-// but that must not block the email side from still going out separately).
-// The pending_edit_fields check below is now mostly a defensive backstop:
-// since 13.08.2026, approving a lead (status='approved') auto-clears any
-// pending customer-edit marker (decided with the client — "Freigeben" alone
-// is the trust signal now, no separate manual review step). This condition
-// should therefore rarely if ever exclude anything in practice.
+// Leads eligible for the automated Microsoft Graph email send job. Gated on
+// the real, explicit email_approved_at timestamp — NOT the coarse overall
+// status. Before 18.08.2026 this checked status IN ('approved','sent'),
+// which meant a lead approved only on the LinkedIn side (status='approved')
+// could still have its never-reviewed email sent automatically. That
+// happened in production once — this is the direct fix.
 export async function listSendableEmails(
   clientToken: string,
   limit: number,
@@ -243,7 +235,9 @@ export async function listSendableEmails(
   const rs = await db.execute({
     sql: `SELECT * FROM leads
            WHERE client_token = ?
-             AND status IN ('approved', 'sent')
+             AND send_paused_at = ''
+             AND status NOT IN ('rejected', 'dnd', 'call_booked')
+             AND email_approved_at <> ''
              AND email_sent_at = ''
              AND trim(email_body) <> ''
              AND trim(email) <> ''
@@ -331,6 +325,33 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
 // refreshed and an already-reviewed lead (status != 'new') is flagged
 // 'revised' so it resurfaces; the comment and created_at are preserved.
 // Leads without a linkedin_url can't be matched, so they are always inserted.
+// The one place that defines "is this lead fully approved" — depends on
+// which channel(s) actually apply. A linkedin-only lead only ever needs the
+// LinkedIn approval; a both-channel lead needs both, independently.
+function isFullyApproved(
+  channel: LeadChannel,
+  linkedinApprovedAt: string,
+  emailApprovedAt: string,
+): boolean {
+  const linkedinOk = channel === "email" || !!linkedinApprovedAt;
+  const emailOk = channel === "linkedin" || !!emailApprovedAt;
+  return linkedinOk && emailOk;
+}
+
+// Same idea for "sent": a both-channel lead is only truly Gesendet once
+// BOTH channels have actually gone out. Before 18.08.2026, clicking either
+// "DM gesendet" or "E-Mail gesendet" alone force-set status to 'sent',
+// making the status pill lie for the still-outstanding channel.
+function isFullySent(
+  channel: LeadChannel,
+  dmSentAt: string,
+  emailSentAt: string,
+): boolean {
+  const linkedinOk = channel === "email" || !!dmSentAt;
+  const emailOk = channel === "linkedin" || !!emailSentAt;
+  return linkedinOk && emailOk;
+}
+
 export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
   const token = payload.client_token!.trim();
   const linkedin = payload.linkedin_url?.trim();
@@ -358,6 +379,10 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
         research_summary  = excluded.research_summary,
         title             = excluded.title,
         channel           = excluded.channel,
+        -- A resend can overwrite the text — any prior approval was only ever
+        -- for the exact text it was granted on, so it can't carry over.
+        linkedin_approved_at = '',
+        email_approved_at    = '',
         -- A re-send of an already-reviewed lead flags it as revised so it
         -- resurfaces for another look; untouched 'new' leads stay 'new'.
         -- A DND/Absage lead is sticky — never resurfaces, no matter how
@@ -427,22 +452,38 @@ export async function updateLead(
     acceptFields?: string[];
     revertFields?: string[];
     // Reassigns which channel(s) a lead is eligible for. Deliberately its own
-    // independent field — never touches text, status, or review markers.
+    // independent field — never touches text or review markers (but DOES
+    // affect what "fully approved" means — see isFullyApproved).
     channel?: string;
     // Corrects/adds the contact email address. Same principle: independent
     // of everything else, admin-only, no side effects on text or status.
     email?: string;
+    // Emergency stop — available to admin AND client. Blocks the automated
+    // send queue outright and disables the manual send-confirmation buttons,
+    // regardless of status/channel/approval. Decided 18.08.2026.
+    paused?: boolean;
+    // Explicit, separate approval per channel (18.08.2026). Approving
+    // LinkedIn never approves the email side, and vice versa — closes the
+    // gap where a lead was approved for LinkedIn and its still-unreviewed
+    // email went out anyway. Setting one just stamps that channel's
+    // timestamp; it never touches the other channel's approval.
+    approveChannel?: "linkedin" | "email";
   },
 ): Promise<Lead | undefined> {
   const existing = await getLead(id);
   if (!existing) return undefined;
 
-  const status = changes.status ?? existing.status;
   const comment =
     changes.comment !== undefined ? changes.comment : existing.comment;
   const channel =
     changes.channel !== undefined ? normalizeChannel(changes.channel) : existing.channel;
   const email = changes.email !== undefined ? extractEmail(changes.email) : existing.email;
+  const send_paused_at =
+    changes.paused === undefined
+      ? existing.send_paused_at
+      : changes.paused
+        ? new Date().toISOString()
+        : "";
   const dm_sent_at =
     changes.dm_sent_at !== undefined ? changes.dm_sent_at : existing.dm_sent_at;
   const email_sent_at =
@@ -498,20 +539,108 @@ export async function updateLead(
     }
   }
 
-  // Decided with the client (13.08.2026): clicking "Freigeben" is itself the
-  // trust signal, whoever clicks it — no separate manual "Übernehmen" gate.
-  // Approving a lead auto-clears any still-pending edit markers on it.
-  if (changes.status === "approved") {
-    for (const field of TRACKED_FIELDS) {
-      original[field] = "";
-      pending.delete(field);
+  // Did the actual LinkedIn / email text change value in this update, via
+  // ANY path — direct edit, "Original wiederherstellen", even an admin edit?
+  // If so, whatever approval existed for the old text no longer applies to
+  // the new text and must be re-earned. This is the rule that makes approval
+  // trustworthy: it always matches the exact text it was granted for.
+  const linkedinTextChanged = current.generated_message !== existing.generated_message;
+  const emailTextChanged =
+    current.email_subject !== existing.email_subject ||
+    current.email_body !== existing.email_body;
+
+  let linkedin_approved_at = existing.linkedin_approved_at;
+  let email_approved_at = existing.email_approved_at;
+
+  if (changes.approveChannel === "linkedin") linkedin_approved_at = new Date().toISOString();
+  if (changes.approveChannel === "email") email_approved_at = new Date().toISOString();
+
+  // Invalidation always wins over approval, even if (implausibly) both were
+  // requested in the same call — a stale approval must never survive.
+  if (linkedinTextChanged) linkedin_approved_at = "";
+  if (emailTextChanged) email_approved_at = "";
+
+  // A hard reject, a DND/Absage, a booked call, or an explicit manual
+  // downgrade back to "Neu" all kill any standing approval outright —
+  // full-lead resets, so both channels reset with them.
+  if (
+    changes.status === "rejected" ||
+    changes.status === "dnd" ||
+    changes.status === "new" ||
+    changes.status === "call_booked"
+  ) {
+    linkedin_approved_at = "";
+    email_approved_at = "";
+  }
+  // "Überarbeitet" is set two ways: (a) the API layer sets it automatically
+  // whenever a message field was just edited — already precisely handled
+  // above (only the channel whose text actually changed loses its
+  // approval); or (b) someone manually flags the lead via the status
+  // dropdown with no accompanying edit, meaning "needs a fresh look" for
+  // everything — that's a full reset, so both are cleared. Never do both:
+  // an edit to just the LinkedIn text must never also wipe a still-valid,
+  // untouched email approval.
+  if (changes.status === "revised" && !linkedinTextChanged && !emailTextChanged) {
+    linkedin_approved_at = "";
+    email_approved_at = "";
+  }
+
+  // "Freigeben" auto-clears any pending customer-edit marker on the channel
+  // being approved (decided with the client 13.08.2026 — approving is
+  // itself the trust signal) — but only for that one channel's fields, not
+  // both, since the two are approved independently now.
+  if (changes.approveChannel === "linkedin") {
+    original.generated_message = "";
+    pending.delete("generated_message");
+  }
+  if (changes.approveChannel === "email") {
+    original.email_subject = "";
+    original.email_body = "";
+    pending.delete("email_subject");
+    pending.delete("email_body");
+  }
+
+  // Status: explicit terminal actions (reject/dnd/sent/call_booked) or an
+  // explicit status from the API layer (e.g. "revised" after an edit) always
+  // win. A pure approve-channel call with no explicit status auto-promotes
+  // to "approved" once every channel this lead actually needs is approved —
+  // and otherwise leaves status exactly as it was; approving one of two
+  // required channels shouldn't (yet) claim the whole lead is approved.
+  let status = changes.status ?? existing.status;
+  if (changes.status === undefined && changes.approveChannel) {
+    if (isFullyApproved(channel, linkedin_approved_at, email_approved_at)) {
+      status = "approved";
     }
+  }
+  // Same principle for the send confirmations: clicking "DM gesendet" or
+  // "E-Mail gesendet" only promotes status to "sent" once every channel this
+  // lead actually needs has gone out. Otherwise it stays "approved" (or
+  // whatever it already was) — never downgrades something further along
+  // like "replied" or "call_booked" back to "sent".
+  if (
+    changes.status === undefined &&
+    (changes.dm_sent_at !== undefined || changes.email_sent_at !== undefined) &&
+    (existing.status === "approved" || existing.status === "sent") &&
+    isFullySent(channel, dm_sent_at, email_sent_at)
+  ) {
+    status = "sent";
+  }
+  // Hard safety net, independent of how this function was called: "approved"
+  // is a claim that every applicable channel was individually, deliberately
+  // approved. It can never be true just because someone (or some other code
+  // path, e.g. the raw status dropdown) set status="approved" directly — if
+  // the underlying approvals don't actually back that up, it's downgraded.
+  // Sending is gated on the approval timestamps anyway, never on this label,
+  // but the label must never lie about what's actually been reviewed.
+  if (status === "approved" && !isFullyApproved(channel, linkedin_approved_at, email_approved_at)) {
+    status = existing.status === "new" ? "new" : "revised";
   }
 
   const db = await getDb();
   await db.execute({
     sql: `UPDATE leads SET
-            status = ?, comment = ?, channel = ?, email = ?,
+            status = ?, comment = ?, channel = ?, email = ?, send_paused_at = ?,
+            linkedin_approved_at = ?, email_approved_at = ?,
             generated_message = ?, email_subject = ?, email_body = ?,
             generated_message_original = ?, email_subject_original = ?, email_body_original = ?,
             pending_edit_fields = ?,
@@ -523,6 +652,9 @@ export async function updateLead(
       comment,
       channel,
       email,
+      send_paused_at,
+      linkedin_approved_at,
+      email_approved_at,
       current.generated_message,
       current.email_subject,
       current.email_body,

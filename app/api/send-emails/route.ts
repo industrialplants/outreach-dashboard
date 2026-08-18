@@ -75,7 +75,6 @@ async function run(): Promise<{
       });
       await updateLead(lead.id, {
         email_sent_at: new Date().toISOString(),
-        status: "sent",
         isAdminEdit: true,
       });
       sent++;

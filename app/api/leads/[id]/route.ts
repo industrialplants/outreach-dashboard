@@ -20,6 +20,8 @@ interface PatchBody {
   email_sent_at?: string;
   channel?: string; // admin-only: reassigns which channel(s) a lead is meant for
   email?: string; // admin-only: corrects/adds the contact email address
+  paused?: boolean; // admin OR client: emergency stop, blocks all sending
+  approve_channel?: "linkedin" | "email"; // separate approval per channel
   token?: string; // caller's board token, used to authorize the change
 }
 
@@ -89,6 +91,14 @@ export async function PATCH(
     // Admin-only: correcting/adding the contact email address for leads that
     // were originally sourced without one (e.g. a LinkedIn-only campaign).
     email: isAdmin ? body.email : undefined,
+    // Emergency stop: intentionally NOT admin-gated — the whole point is
+    // that a client can halt a lead themself the instant they spot a
+    // problem, without needing to wait for someone on the agency side.
+    paused: body.paused,
+    approveChannel:
+      body.approve_channel === "linkedin" || body.approve_channel === "email"
+        ? body.approve_channel
+        : undefined,
   });
 
   return NextResponse.json({ ok: true, lead: updated });
