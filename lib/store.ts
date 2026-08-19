@@ -220,6 +220,35 @@ export async function listLeads(clientToken: string): Promise<Lead[]> {
   return rs.rows.map(mapLead);
 }
 
+// One-time backfill (18.08.2026): the separate per-channel approval columns
+// default to empty for all pre-existing leads. For a channel that's already
+// been sent, backfilling its approval timestamp is risk-free — the send
+// already happened, nothing new can be triggered by it — and it clears up
+// the cosmetic oddity of an already-sent lead still showing an active
+// "freigeben" button. Deliberately does NOT touch leads that are merely
+// "approved" but not yet sent — restoring approval there would undermine
+// the entire point of the 18.08.2026 fix (an old blanket approval never
+// guaranteed each channel was actually reviewed individually).
+export async function backfillApprovalForAlreadySent(clientToken: string): Promise<number> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: `UPDATE leads
+           SET linkedin_approved_at = CASE
+                 WHEN dm_sent_at <> '' AND linkedin_approved_at = '' THEN dm_sent_at
+                 ELSE linkedin_approved_at
+               END,
+               email_approved_at = CASE
+                 WHEN email_sent_at <> '' AND email_approved_at = '' THEN email_sent_at
+                 ELSE email_approved_at
+               END
+           WHERE client_token = ?
+             AND ((dm_sent_at <> '' AND linkedin_approved_at = '')
+                  OR (email_sent_at <> '' AND email_approved_at = ''))`,
+    args: [clientToken],
+  });
+  return rs.rowsAffected;
+}
+
 
 // Leads eligible for the automated Microsoft Graph email send job. Gated on
 // the real, explicit email_approved_at timestamp — NOT the coarse overall

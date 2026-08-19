@@ -68,18 +68,28 @@ function matchesFilter(lead: Lead, filter: LeadFilter): boolean {
   return lead.status === filter;
 }
 
-type ChannelFilter = "all" | "linkedin" | "email";
+type ChannelFilter = "all" | "linkedin" | "email" | "email_pending";
 
 const CHANNEL_FILTERS: { key: ChannelFilter; label: string }[] = [
   { key: "all", label: "Alle Kanäle" },
   { key: "linkedin", label: "💬 LinkedIn" },
   { key: "email", label: "📧 E-Mail" },
+  { key: "email_pending", label: "📧 E-Mail ausstehend" },
 ];
 
 function matchesChannelFilter(lead: Lead, filter: ChannelFilter): boolean {
   if (filter === "all") return true;
   if (filter === "linkedin") return lead.channel === "linkedin" || lead.channel === "both";
-  return lead.channel === "email" || lead.channel === "both";
+  if (filter === "email") return lead.channel === "email" || lead.channel === "both";
+  // "E-Mail ausstehend": needs an email (channel allows it), hasn't gotten
+  // one yet — regardless of the overall status label, which can be stale
+  // for leads marked "Gesendet" under the old single-channel-status logic.
+  return (
+    (lead.channel === "email" || lead.channel === "both") &&
+    !lead.email_sent_at &&
+    lead.status !== "rejected" &&
+    lead.status !== "dnd"
+  );
 }
 
 export default function Dashboard({
@@ -265,7 +275,7 @@ export default function Dashboard({
       </nav>
 
       {tab === "clients" && role === "admin" ? (
-        <ClientsPanel adminToken={adminToken!} />
+        <ClientsPanel adminToken={adminToken!} selectedClientToken={selected?.token ?? null} />
       ) : noBoard ? (
         <section className="empty big">
           <p>Noch keine Kunden angelegt.</p>
@@ -1136,7 +1146,13 @@ function generateToken(name: string): string {
 }
 
 // Admin-only "Kunden" tab: list, create and delete client boards.
-function ClientsPanel({ adminToken }: { adminToken: string }) {
+function ClientsPanel({
+  adminToken,
+  selectedClientToken,
+}: {
+  adminToken: string;
+  selectedClientToken: string | null;
+}) {
   const [clients, setClients] = useState<ClientWithCount[] | null>(null);
   const [loadError, setLoadError] = useState(false);
 
@@ -1347,6 +1363,35 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
     }
   }
 
+  // One-time cleanup (18.08.2026): backfill approval timestamps only for
+  // channels that are already sent — see backfillApprovalForAlreadySent for
+  // why this is safe and deliberately doesn't touch not-yet-sent leads.
+  const [backfilling2, setBackfilling2] = useState(false);
+  const [backfill2Done, setBackfill2Done] = useState<number | null>(null);
+
+  async function backfillApprovalCleanup() {
+    if (!selectedClientToken) return;
+    setBackfilling2(true);
+    setBackfill2Done(null);
+    try {
+      const res = await fetch("/api/backfill-approval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminToken, clientToken: selectedClientToken }),
+      });
+      const data = (await res.json()) as { updated?: number; error?: string };
+      if (!res.ok) {
+        alert(data.error ?? "Nachtragen fehlgeschlagen.");
+        return;
+      }
+      setBackfill2Done(data.updated ?? 0);
+    } catch {
+      alert("Netzwerkfehler. Bitte erneut versuchen.");
+    } finally {
+      setBackfilling2(false);
+    }
+  }
+
   return (
     <section className="clients-panel">
       <div className="clients-list-card send-emails-card">
@@ -1378,6 +1423,26 @@ function ClientsPanel({ adminToken }: { adminToken: string }) {
               </>
             )}
           </div>
+        )}
+      </div>
+
+      <div className="clients-list-card">
+        <h2 className="section-title">Einmaliger Nachtrag (18.08.2026)</h2>
+        <p className="muted" style={{ margin: "0 0 12px" }}>
+          Trägt Freigabe-Zeitstempel nach — aber ausschließlich für Kanäle,
+          die bereits tatsächlich verschickt wurden (risikofrei, ändert
+          nichts an noch nicht gesendeten Leads). Wirkt auf den gerade oben
+          ausgewählten Kunden.
+        </p>
+        <button
+          className="btn ghost"
+          onClick={backfillApprovalCleanup}
+          disabled={backfilling2 || !selectedClientToken}
+        >
+          {backfilling2 ? "Trage nach…" : "Bereits gesendete Kanäle nachtragen"}
+        </button>
+        {backfill2Done !== null && (
+          <span className="muted"> → {backfill2Done} Leads aktualisiert</span>
         )}
       </div>
 
