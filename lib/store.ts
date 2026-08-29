@@ -45,6 +45,7 @@ function mapLead(r: Row): Lead {
     status: String(r.status) as LeadStatus,
     comment: String(r.comment),
     channel: (String(r.channel) || "both") as LeadChannel,
+    campaign: String(r.campaign),
     send_paused_at: String(r.send_paused_at),
     linkedin_approved_at: String(r.linkedin_approved_at),
     email_approved_at: String(r.email_approved_at),
@@ -251,6 +252,32 @@ export async function backfillApprovalForAlreadySent(clientToken: string): Promi
 }
 
 
+// One-time backfill (19.08.2026): before the campaign field existed, "Beide
+// Kanäle" leads were all the CEO campaign and "Nur LinkedIn" leads were all
+// HR. Tags every existing lead accordingly — but only where campaign is
+// still empty, so it can never overwrite a value someone already set by
+// hand, and running it twice is harmless.
+export async function backfillCampaignFromChannel(
+  clientToken: string,
+  bothLabel: string,
+  linkedinLabel: string,
+): Promise<number> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: `UPDATE leads
+           SET campaign = CASE
+                 WHEN channel = 'both' THEN ?
+                 WHEN channel = 'linkedin' THEN ?
+                 ELSE campaign
+               END
+           WHERE client_token = ?
+             AND campaign = ''
+             AND channel IN ('both', 'linkedin')`,
+    args: [bothLabel, linkedinLabel, clientToken],
+  });
+  return rs.rowsAffected;
+}
+
 // Leads eligible for the automated Microsoft Graph email send job. Gated on
 // the real, explicit email_approved_at timestamp — NOT the coarse overall
 // status. Before 18.08.2026 this checked status IN ('approved','sent'),
@@ -317,11 +344,11 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
   const info = await db.execute({
     sql: `INSERT INTO leads (
         client_token, name, company, title, linkedin_url, email,
-        generated_message, email_subject, email_body, research_summary, signal, status, comment, channel,
+        generated_message, email_subject, email_body, research_summary, signal, status, comment, channel, campaign,
         created_at, updated_at
       ) VALUES (
         $client_token, $name, $company, $title, $linkedin_url, $email,
-        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '', $channel,
+        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '', $channel, $campaign,
         $created_at, $updated_at
       )`,
     args: {
@@ -337,6 +364,7 @@ export async function createLead(payload: WebhookPayload): Promise<Lead> {
       research_summary: payload.research_summary ?? "",
       signal: payload.signal ?? "",
       channel: normalizeChannel(payload.channel),
+      campaign: (payload.campaign ?? "").trim(),
       created_at: now,
       updated_at: now,
     },
@@ -461,11 +489,11 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
   await db.execute({
     sql: `INSERT INTO leads (
         client_token, name, company, title, linkedin_url, email,
-        generated_message, email_subject, email_body, research_summary, signal, status, comment, channel,
+        generated_message, email_subject, email_body, research_summary, signal, status, comment, channel, campaign,
         created_at, updated_at
       ) VALUES (
         $client_token, $name, $company, $title, $linkedin_url, $email,
-        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '', $channel,
+        $generated_message, $email_subject, $email_body, $research_summary, $signal, 'new', '', $channel, $campaign,
         $created_at, $updated_at
       )
       ON CONFLICT(client_token, linkedin_url) WHERE linkedin_url <> ''
@@ -473,12 +501,13 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
         -- generated_message, email_subject, email_body, linkedin_approved_at,
         -- email_approved_at, status, pending_edit_fields, dm_sent_at,
         -- email_sent_at are deliberately NOT listed here — a resend can
-        -- never touch any of them once the row exists. Only these five
+        -- never touch any of them once the row exists. Only these
         -- "metadata" fields still refresh on a resend:
         signal            = excluded.signal,
         research_summary  = excluded.research_summary,
         title             = excluded.title,
         channel           = excluded.channel,
+        campaign          = CASE WHEN excluded.campaign <> '' THEN excluded.campaign ELSE leads.campaign END,
         updated_at        = excluded.updated_at`,
     args: {
       client_token: token,
@@ -493,6 +522,7 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
       research_summary: payload.research_summary ?? "",
       signal: payload.signal ?? "",
       channel: normalizeChannel(payload.channel),
+      campaign: (payload.campaign ?? "").trim(),
       created_at: now,
       updated_at: now,
     },
@@ -574,6 +604,9 @@ export async function updateLead(
     // Corrects/adds the contact email address. Same principle: independent
     // of everything else, admin-only, no side effects on text or status.
     email?: string;
+    // Free-text campaign label (e.g. "CEO", "HR") — same independence
+    // guarantee as channel/email: admin-only, no side effects elsewhere.
+    campaign?: string;
     // Emergency stop — available to admin AND client. Blocks the automated
     // send queue outright and disables the manual send-confirmation buttons,
     // regardless of status/channel/approval. Decided 18.08.2026.
@@ -594,6 +627,7 @@ export async function updateLead(
   const channel =
     changes.channel !== undefined ? normalizeChannel(changes.channel) : existing.channel;
   const email = changes.email !== undefined ? extractEmail(changes.email) : existing.email;
+  const campaign = changes.campaign !== undefined ? changes.campaign.trim() : existing.campaign;
   const send_paused_at =
     changes.paused === undefined
       ? existing.send_paused_at
@@ -785,7 +819,7 @@ export async function updateLead(
   }
   await db.execute({
     sql: `UPDATE leads SET
-            status = ?, comment = ?, channel = ?, email = ?, send_paused_at = ?,
+            status = ?, comment = ?, channel = ?, campaign = ?, email = ?, send_paused_at = ?,
             linkedin_approved_at = ?, email_approved_at = ?,
             generated_message = ?, email_subject = ?, email_body = ?,
             generated_message_original = ?, email_subject_original = ?, email_body_original = ?,
@@ -797,6 +831,7 @@ export async function updateLead(
       status,
       comment,
       channel,
+      campaign,
       email,
       send_paused_at,
       linkedin_approved_at,

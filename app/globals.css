@@ -678,6 +678,33 @@ code {
   min-width: 220px;
 }
 
+.campaign-pill {
+  color: var(--muted-2);
+  border-color: var(--border);
+  background: var(--panel-2);
+}
+.campaign-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.campaign-editor input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  min-width: 120px;
+}
+
+.campaign-filters {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--border);
+}
+
 /* ---------- Report ---------- */
 
 .report {

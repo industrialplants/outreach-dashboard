@@ -147,6 +147,7 @@ export default function Dashboard({
   const [tab, setTab] = useState<Tab>("leads");
   const [leadFilter, setLeadFilter] = useState<LeadFilter>("all");
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
+  const [campaignFilter, setCampaignFilter] = useState<string>("");
   const [listOpen, setListOpen] = useState(false);
   const [listCopied, setListCopied] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -200,6 +201,7 @@ export default function Dashboard({
       dm_blocked_at?: string;
       channel?: string;
       email?: string;
+      campaign?: string;
       paused?: boolean;
       approve_channel?: "linkedin" | "email";
     },
@@ -373,9 +375,42 @@ export default function Dashboard({
             )}
           </div>
           {kpis && <KpiRow kpis={kpis} />}
+          {(() => {
+            const campaigns = Array.from(
+              new Set(leads.map((l) => l.campaign).filter(Boolean)),
+            ).sort();
+            if (campaigns.length === 0) return null;
+            return (
+              <nav className="channel-filters campaign-filters">
+                <button
+                  className={campaignFilter === "" ? "filter-chip active" : "filter-chip"}
+                  onClick={() => setCampaignFilter("")}
+                >
+                  Alle Kampagnen
+                  <span className="filter-count">{leads.length}</span>
+                </button>
+                {campaigns.map((c) => (
+                  <button
+                    key={c}
+                    className={campaignFilter === c ? "filter-chip active" : "filter-chip"}
+                    onClick={() => setCampaignFilter(c)}
+                  >
+                    🏷 {c}
+                    <span className="filter-count">
+                      {leads.filter((l) => l.campaign === c).length}
+                    </span>
+                  </button>
+                ))}
+              </nav>
+            );
+          })()}
           <nav className="channel-filters">
             {CHANNEL_FILTERS.filter((f) => !f.adminOnly || role === "admin").map((f) => {
-              const count = leads.filter((l) => matchesChannelFilter(l, f.key)).length;
+              const count = leads.filter(
+                (l) =>
+                  (campaignFilter === "" || l.campaign === campaignFilter) &&
+                  matchesChannelFilter(l, f.key),
+              ).length;
               return (
                 <button
                   key={f.key}
@@ -393,7 +428,10 @@ export default function Dashboard({
           <nav className="lead-filters">
             {LEAD_FILTERS.map((f) => {
               const count = leads.filter(
-                (l) => matchesChannelFilter(l, channelFilter) && matchesFilter(l, f.key),
+                (l) =>
+                  (campaignFilter === "" || l.campaign === campaignFilter) &&
+                  matchesChannelFilter(l, channelFilter) &&
+                  matchesFilter(l, f.key),
               ).length;
               return (
                 <button
@@ -411,11 +449,15 @@ export default function Dashboard({
           </nav>
           {(() => {
             const filteredLeads = leads.filter(
-              (l) => matchesChannelFilter(l, channelFilter) && matchesFilter(l, leadFilter),
+              (l) =>
+                (campaignFilter === "" || l.campaign === campaignFilter) &&
+                matchesChannelFilter(l, channelFilter) &&
+                matchesFilter(l, leadFilter),
             );
             return (
               <>
-                {role === "admin" && (channelFilter !== "all" || leadFilter !== "all") && (
+                {role === "admin" &&
+                  (channelFilter !== "all" || leadFilter !== "all" || campaignFilter !== "") && (
                   <div className="list-export">
                     <button
                       className="btn ghost small"
@@ -455,7 +497,7 @@ export default function Dashboard({
                   onDelete={role === "admin" ? removeLead : undefined}
                   isAdmin={role === "admin"}
                   adminToken={role === "admin" ? adminToken : null}
-                  filtered={leadFilter !== "all" || channelFilter !== "all"}
+                  filtered={leadFilter !== "all" || channelFilter !== "all" || campaignFilter !== ""}
                 />
               </>
             );
@@ -524,6 +566,7 @@ function LeadList({
       dm_blocked_at?: string;
       channel?: string;
       email?: string;
+      campaign?: string;
       paused?: boolean;
       approve_channel?: "linkedin" | "email";
     },
@@ -672,6 +715,7 @@ function LeadCard({
       dm_blocked_at?: string;
       channel?: string;
       email?: string;
+      campaign?: string;
       paused?: boolean;
       approve_channel?: "linkedin" | "email";
     },
@@ -689,6 +733,8 @@ function LeadCard({
   const [editBody, setEditBody] = useState(lead.email_body || "");
   const [editingEmail, setEditingEmail] = useState(false);
   const [emailValue, setEmailValue] = useState(lead.email || "");
+  const [editingCampaign, setEditingCampaign] = useState(false);
+  const [campaignValue, setCampaignValue] = useState(lead.campaign || "");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<
@@ -769,6 +815,46 @@ function LeadCard({
                 {lead.channel === "linkedin" ? "💬 Nur LinkedIn" : "📧 Nur E-Mail"}
               </span>
             )
+          )}
+          {isAdmin ? (
+            editingCampaign ? (
+              <span className="campaign-editor">
+                <input
+                  type="text"
+                  value={campaignValue}
+                  onChange={(e) => setCampaignValue(e.target.value)}
+                  placeholder="z. B. CEO, HR"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      onMutate(lead.id, { campaign: campaignValue.trim() });
+                      setEditingCampaign(false);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => {
+                    onMutate(lead.id, { campaign: campaignValue.trim() });
+                    setEditingCampaign(false);
+                  }}
+                >
+                  ✓
+                </button>
+              </span>
+            ) : (
+              <span
+                className="status-pill campaign-pill"
+                onClick={() => setEditingCampaign(true)}
+                title="Kampagne ändern"
+                style={{ cursor: "pointer" }}
+              >
+                🏷 {lead.campaign || "Kampagne setzen"}
+              </span>
+            )
+          ) : (
+            lead.campaign && <span className="status-pill campaign-pill">🏷 {lead.campaign}</span>
           )}
           {isAdmin && pendingFields.size > 0 && (
             <span className="status-pill pending-review-pill" title="Kundenänderung wartet auf Review">
@@ -1563,6 +1649,43 @@ function ClientsPanel({
     }
   }
 
+  // One-time cleanup (19.08.2026): tag every pre-existing lead with a
+  // campaign label based on its current channel — see
+  // backfillCampaignFromChannel for why this is safe (only touches leads
+  // with no campaign set yet).
+  const [bothLabel, setBothLabel] = useState("CEO");
+  const [linkedinLabel, setLinkedinLabel] = useState("HR");
+  const [backfilling3, setBackfilling3] = useState(false);
+  const [backfill3Done, setBackfill3Done] = useState<number | null>(null);
+
+  async function backfillCampaignCleanup() {
+    if (!selectedClientToken || !bothLabel.trim() || !linkedinLabel.trim()) return;
+    setBackfilling3(true);
+    setBackfill3Done(null);
+    try {
+      const res = await fetch("/api/backfill-campaign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminToken,
+          clientToken: selectedClientToken,
+          bothLabel: bothLabel.trim(),
+          linkedinLabel: linkedinLabel.trim(),
+        }),
+      });
+      const data = (await res.json()) as { updated?: number; error?: string };
+      if (!res.ok) {
+        alert(data.error ?? "Nachtragen fehlgeschlagen.");
+        return;
+      }
+      setBackfill3Done(data.updated ?? 0);
+    } catch {
+      alert("Netzwerkfehler. Bitte erneut versuchen.");
+    } finally {
+      setBackfilling3(false);
+    }
+  }
+
   return (
     <section className="clients-panel">
       <div className="clients-list-card send-emails-card">
@@ -1614,6 +1737,46 @@ function ClientsPanel({
         </button>
         {backfill2Done !== null && (
           <span className="muted"> → {backfill2Done} Leads aktualisiert</span>
+        )}
+      </div>
+
+      <div className="clients-list-card">
+        <h2 className="section-title">Kampagne aus Kanal ableiten (19.08.2026)</h2>
+        <p className="muted" style={{ margin: "0 0 12px" }}>
+          Trägt einmalig eine Kampagnen-Markierung nach — anhand des aktuellen
+          Kanals. Ändert nur Leads, die noch keine Kampagne haben; bereits
+          gesetzte Werte bleiben unangetastet. Wirkt auf den oben
+          ausgewählten Kunden.
+        </p>
+        <div className="creds-editor" style={{ marginBottom: 10 }}>
+          <label>
+            "Beide Kanäle" →{" "}
+            <input
+              type="text"
+              value={bothLabel}
+              onChange={(e) => setBothLabel(e.target.value)}
+              style={{ width: 100 }}
+            />
+          </label>
+          <label>
+            "Nur LinkedIn" →{" "}
+            <input
+              type="text"
+              value={linkedinLabel}
+              onChange={(e) => setLinkedinLabel(e.target.value)}
+              style={{ width: 100 }}
+            />
+          </label>
+        </div>
+        <button
+          className="btn ghost"
+          onClick={backfillCampaignCleanup}
+          disabled={backfilling3 || !selectedClientToken}
+        >
+          {backfilling3 ? "Trage nach…" : "Kampagne einmalig setzen"}
+        </button>
+        {backfill3Done !== null && (
+          <span className="muted"> → {backfill3Done} Leads aktualisiert</span>
         )}
       </div>
 

@@ -21,6 +21,7 @@ interface PatchBody {
   dm_blocked_at?: string;
   channel?: string; // admin-only: reassigns which channel(s) a lead is meant for
   email?: string; // admin-only: corrects/adds the contact email address
+  campaign?: string; // admin-only: free-text campaign label (e.g. "CEO", "HR")
   paused?: boolean; // admin OR client: emergency stop, blocks all sending
   approve_channel?: "linkedin" | "email"; // separate approval per channel
   token?: string; // caller's board token, used to authorize the change
@@ -93,6 +94,8 @@ export async function PATCH(
     // Admin-only: correcting/adding the contact email address for leads that
     // were originally sourced without one (e.g. a LinkedIn-only campaign).
     email: isAdmin ? body.email : undefined,
+    // Admin-only, independent field — same principle as channel/email.
+    campaign: isAdmin ? body.campaign : undefined,
     // Emergency stop: intentionally NOT admin-gated — the whole point is
     // that a client can halt a lead themself the instant they spot a
     // problem, without needing to wait for someone on the agency side.

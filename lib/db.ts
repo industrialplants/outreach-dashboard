@@ -63,6 +63,7 @@ async function migrate(db: Client): Promise<void> {
       email_body_original        TEXT NOT NULL DEFAULT '',
       pending_edit_fields         TEXT NOT NULL DEFAULT '',
       channel           TEXT NOT NULL DEFAULT 'both',
+      campaign          TEXT NOT NULL DEFAULT '',
       send_paused_at    TEXT NOT NULL DEFAULT '',
       linkedin_approved_at TEXT NOT NULL DEFAULT '',
       email_approved_at    TEXT NOT NULL DEFAULT '',
@@ -151,6 +152,11 @@ async function migrate(db: Client): Promise<void> {
   if (!existing.has("channel")) {
     await db.execute(
       "ALTER TABLE leads ADD COLUMN channel TEXT NOT NULL DEFAULT 'both'",
+    );
+  }
+  if (!existing.has("campaign")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN campaign TEXT NOT NULL DEFAULT ''",
     );
   }
   if (!existing.has("send_paused_at")) {

@@ -55,6 +55,12 @@ export interface Lead {
   status: LeadStatus;
   comment: string;
   channel: LeadChannel; // which channel(s) this lead is meant to be contacted through
+  // Free-text campaign label (e.g. "CEO", "HR") — fully independent of
+  // channel. Added 19.08.2026 because two campaigns happened to correlate
+  // with channel (CEO=both, HR=linkedin-only) at first, which made the
+  // overall "Alle Kanäle" view confusing once that correlation mattered
+  // less than which actual campaign a lead belonged to.
+  campaign: string;
   send_paused_at: string; // ISO 8601, non-empty = emergency stop is active — blocks all sending
   // Separate, independent approval per channel — approving one never implies
   // the other. Cleared automatically the moment the corresponding text
@@ -129,4 +135,5 @@ export interface WebhookPayload {
   signal?: string;
   client_token?: string;
   channel?: string; // "linkedin" | "email" | "both" — defaults to "both" if omitted/unrecognized
+  campaign?: string; // free-text campaign label, e.g. "CEO", "HR"
 }
