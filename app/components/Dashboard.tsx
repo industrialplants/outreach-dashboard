@@ -74,7 +74,8 @@ type ChannelFilter =
   | "email"
   | "email_pending"
   | "nothing_sent"
-  | "partial_sent";
+  | "partial_sent"
+  | "dm_blocked";
 
 const CHANNEL_FILTERS: { key: ChannelFilter; label: string; adminOnly?: boolean }[] = [
   { key: "all", label: "Alle Kanäle" },
@@ -83,6 +84,7 @@ const CHANNEL_FILTERS: { key: ChannelFilter; label: string; adminOnly?: boolean 
   { key: "email_pending", label: "📧 E-Mail ausstehend" },
   { key: "nothing_sent", label: "🗑 Nichts gesendet", adminOnly: true },
   { key: "partial_sent", label: "✏️ Nur Mail fehlt", adminOnly: true },
+  { key: "dm_blocked", label: "🚫 DM nicht möglich", adminOnly: true },
 ];
 
 function matchesChannelFilter(lead: Lead, filter: ChannelFilter): boolean {
@@ -117,12 +119,19 @@ function matchesChannelFilter(lead: Lead, filter: ChannelFilter): boolean {
   // history must be preserved, never deleted. Only the still-missing side
   // needs a manual rewrite via "Bearbeiten". A single-channel lead is either
   // fully done or fully not-done, never "partial", so it's excluded here.
-  return (
-    lead.channel === "both" &&
-    (!!lead.dm_sent_at || !!lead.dm_blocked_at) !== !!lead.email_sent_at &&
-    lead.status !== "rejected" &&
-    lead.status !== "dnd"
-  );
+  if (filter === "partial_sent") {
+    return (
+      lead.channel === "both" &&
+      (!!lead.dm_sent_at || !!lead.dm_blocked_at) !== !!lead.email_sent_at &&
+      lead.status !== "rejected" &&
+      lead.status !== "dnd"
+    );
+  }
+  // "dm_blocked": everyone flagged as technically unreachable via LinkedIn —
+  // lets you cross-check against "Nichts gesendet" before bulk-deleting, so
+  // a lead you already know can't be DM'd never gets swept up for a
+  // pointless LinkedIn regeneration.
+  return !!lead.dm_blocked_at;
 }
 
 export default function Dashboard({
@@ -138,6 +147,8 @@ export default function Dashboard({
   const [tab, setTab] = useState<Tab>("leads");
   const [leadFilter, setLeadFilter] = useState<LeadFilter>("all");
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
+  const [listOpen, setListOpen] = useState(false);
+  const [listCopied, setListCopied] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -398,16 +409,57 @@ export default function Dashboard({
               );
             })}
           </nav>
-          <LeadList
-            leads={leads.filter(
+          {(() => {
+            const filteredLeads = leads.filter(
               (l) => matchesChannelFilter(l, channelFilter) && matchesFilter(l, leadFilter),
-            )}
-            onMutate={mutate}
-            onDelete={role === "admin" ? removeLead : undefined}
-            isAdmin={role === "admin"}
-            adminToken={role === "admin" ? adminToken : null}
-            filtered={leadFilter !== "all" || channelFilter !== "all"}
-          />
+            );
+            return (
+              <>
+                {role === "admin" && (channelFilter !== "all" || leadFilter !== "all") && (
+                  <div className="list-export">
+                    <button
+                      className="btn ghost small"
+                      onClick={() => {
+                        setListOpen((v) => !v);
+                        setListCopied(false);
+                      }}
+                    >
+                      {listOpen ? "Liste ausblenden ▲" : `📋 Liste anzeigen (${filteredLeads.length})`}
+                    </button>
+                    {listOpen && (
+                      <div className="list-export-body">
+                        <pre>
+                          {filteredLeads
+                            .map((l) => `${l.name}${l.company ? ` — ${l.company}` : ""}`)
+                            .join("\n")}
+                        </pre>
+                        <button
+                          className="btn small"
+                          onClick={() => {
+                            const text = filteredLeads
+                              .map((l) => `${l.name}${l.company ? ` — ${l.company}` : ""}`)
+                              .join("\n");
+                            navigator.clipboard.writeText(text);
+                            setListCopied(true);
+                          }}
+                        >
+                          {listCopied ? "✓ Kopiert" : "Kopieren"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <LeadList
+                  leads={filteredLeads}
+                  onMutate={mutate}
+                  onDelete={role === "admin" ? removeLead : undefined}
+                  isAdmin={role === "admin"}
+                  adminToken={role === "admin" ? adminToken : null}
+                  filtered={leadFilter !== "all" || channelFilter !== "all"}
+                />
+              </>
+            );
+          })()}
         </>
       ) : (
         <ReportTable report={report} />

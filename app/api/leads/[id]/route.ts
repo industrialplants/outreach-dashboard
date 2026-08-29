@@ -18,6 +18,7 @@ interface PatchBody {
   revert_fields?: string[];
   dm_sent_at?: string;
   email_sent_at?: string;
+  dm_blocked_at?: string;
   channel?: string; // admin-only: reassigns which channel(s) a lead is meant for
   email?: string; // admin-only: corrects/adds the contact email address
   paused?: boolean; // admin OR client: emergency stop, blocks all sending
@@ -80,6 +81,7 @@ export async function PATCH(
     email_body: body.email_body,
     dm_sent_at: body.dm_sent_at,
     email_sent_at: body.email_sent_at,
+    dm_blocked_at: body.dm_blocked_at,
     isAdminEdit: isAdmin,
     // Accept/revert only ever make sense as an admin review action.
     acceptFields: isAdmin ? body.accept_fields : undefined,

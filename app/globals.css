@@ -232,6 +232,25 @@ code {
 
 /* ---------- KPIs ---------- */
 
+.list-export {
+  margin-bottom: 12px;
+}
+.list-export-body {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.list-export-body pre {
+  margin: 0 0 10px;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
 .send-preview {
   margin-bottom: 16px;
 }
