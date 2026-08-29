@@ -64,6 +64,7 @@ export interface Lead {
   linkedin_approved_at: string;
   email_approved_at: string;
   dm_sent_at: string; // ISO 8601, empty string = not yet sent via LinkedIn DM
+  dm_blocked_at: string; // technically impossible to DM (not connected, no InMail, etc.)
   email_sent_at: string; // ISO 8601, empty string = not yet sent via email
   // Customer-edit tracking: when a client edits a field, its pre-edit value
   // is snapshotted here so the diff can be shown until an admin accepts or
@@ -98,6 +99,7 @@ export interface Kpis {
   callsBooked: number;
   totalLeads: number;
   pendingApproval: number;
+  dmBlocked: number;
 }
 
 export interface WeekReportRow {
@@ -108,6 +110,7 @@ export interface WeekReportRow {
   sent: number;
   dmSent: number;
   emailSent: number;
+  dmBlocked: number;
   replied: number;
   callsBooked: number;
 }

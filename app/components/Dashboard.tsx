@@ -68,25 +68,58 @@ function matchesFilter(lead: Lead, filter: LeadFilter): boolean {
   return lead.status === filter;
 }
 
-type ChannelFilter = "all" | "linkedin" | "email" | "email_pending";
+type ChannelFilter =
+  | "all"
+  | "linkedin"
+  | "email"
+  | "email_pending"
+  | "nothing_sent"
+  | "partial_sent";
 
-const CHANNEL_FILTERS: { key: ChannelFilter; label: string }[] = [
+const CHANNEL_FILTERS: { key: ChannelFilter; label: string; adminOnly?: boolean }[] = [
   { key: "all", label: "Alle Kanäle" },
   { key: "linkedin", label: "💬 LinkedIn" },
   { key: "email", label: "📧 E-Mail" },
   { key: "email_pending", label: "📧 E-Mail ausstehend" },
+  { key: "nothing_sent", label: "🗑 Nichts gesendet", adminOnly: true },
+  { key: "partial_sent", label: "✏️ Nur Mail fehlt", adminOnly: true },
 ];
 
 function matchesChannelFilter(lead: Lead, filter: ChannelFilter): boolean {
   if (filter === "all") return true;
   if (filter === "linkedin") return lead.channel === "linkedin" || lead.channel === "both";
   if (filter === "email") return lead.channel === "email" || lead.channel === "both";
-  // "E-Mail ausstehend": needs an email (channel allows it), hasn't gotten
-  // one yet — regardless of the overall status label, which can be stale
-  // for leads marked "Gesendet" under the old single-channel-status logic.
+  if (filter === "email_pending") {
+    // "E-Mail ausstehend": needs an email (channel allows it), hasn't gotten
+    // one yet — regardless of the overall status label, which can be stale
+    // for leads marked "Gesendet" under the old single-channel-status logic.
+    return (
+      (lead.channel === "email" || lead.channel === "both") &&
+      !lead.email_sent_at &&
+      lead.status !== "rejected" &&
+      lead.status !== "dnd"
+    );
+  }
+  if (filter === "nothing_sent") {
+    // Safe-to-delete-and-regenerate cleanup filter (19.08.2026): neither
+    // channel has actually gone out yet, so deleting and letting Clay
+    // re-run with the fixed prompt loses nothing.
+    return (
+      !lead.dm_sent_at &&
+      !lead.email_sent_at &&
+      !lead.dm_blocked_at &&
+      lead.status !== "rejected" &&
+      lead.status !== "dnd"
+    );
+  }
+  // "partial_sent": only meaningful for both-channel leads — one side
+  // already went out (almost always the DM), the other hasn't. This
+  // history must be preserved, never deleted. Only the still-missing side
+  // needs a manual rewrite via "Bearbeiten". A single-channel lead is either
+  // fully done or fully not-done, never "partial", so it's excluded here.
   return (
-    (lead.channel === "email" || lead.channel === "both") &&
-    !lead.email_sent_at &&
+    lead.channel === "both" &&
+    (!!lead.dm_sent_at || !!lead.dm_blocked_at) !== !!lead.email_sent_at &&
     lead.status !== "rejected" &&
     lead.status !== "dnd"
   );
@@ -153,6 +186,7 @@ export default function Dashboard({
       revert_fields?: string[];
       dm_sent_at?: string;
       email_sent_at?: string;
+      dm_blocked_at?: string;
       channel?: string;
       email?: string;
       paused?: boolean;
@@ -329,7 +363,7 @@ export default function Dashboard({
           </div>
           {kpis && <KpiRow kpis={kpis} />}
           <nav className="channel-filters">
-            {CHANNEL_FILTERS.map((f) => {
+            {CHANNEL_FILTERS.filter((f) => !f.adminOnly || role === "admin").map((f) => {
               const count = leads.filter((l) => matchesChannelFilter(l, f.key)).length;
               return (
                 <button
@@ -371,6 +405,7 @@ export default function Dashboard({
             onMutate={mutate}
             onDelete={role === "admin" ? removeLead : undefined}
             isAdmin={role === "admin"}
+            adminToken={role === "admin" ? adminToken : null}
             filtered={leadFilter !== "all" || channelFilter !== "all"}
           />
         </>
@@ -380,6 +415,8 @@ export default function Dashboard({
     </main>
   );
 }
+
+
 
 function KpiRow({ kpis }: { kpis: Kpis }) {
   const cards = [
@@ -394,6 +431,9 @@ function KpiRow({ kpis }: { kpis: Kpis }) {
     },
     { label: "Gebuchte Calls", value: String(kpis.callsBooked) },
     { label: "Wartet auf Freigabe", value: String(kpis.pendingApproval) },
+    ...(kpis.dmBlocked > 0
+      ? [{ label: "DM nicht möglich", value: String(kpis.dmBlocked) }]
+      : []),
   ];
   return (
     <section className="kpis">
@@ -413,6 +453,7 @@ function LeadList({
   onMutate,
   onDelete,
   isAdmin,
+  adminToken,
   filtered = false,
 }: {
   leads: Lead[];
@@ -428,6 +469,7 @@ function LeadList({
       revert_fields?: string[];
       dm_sent_at?: string;
       email_sent_at?: string;
+      dm_blocked_at?: string;
       channel?: string;
       email?: string;
       paused?: boolean;
@@ -436,6 +478,7 @@ function LeadList({
   ) => void;
   onDelete?: (id: number) => void;
   isAdmin: boolean;
+  adminToken: string | null;
   filtered?: boolean;
 }) {
   if (leads.length === 0) {
@@ -463,6 +506,7 @@ function LeadList({
           onMutate={onMutate}
           onDelete={onDelete}
           isAdmin={isAdmin}
+          adminToken={adminToken}
         />
       ))}
     </section>
@@ -558,6 +602,7 @@ function LeadCard({
   onMutate,
   onDelete,
   isAdmin,
+  adminToken,
 }: {
   lead: Lead;
   onMutate: (
@@ -572,6 +617,7 @@ function LeadCard({
       revert_fields?: string[];
       dm_sent_at?: string;
       email_sent_at?: string;
+      dm_blocked_at?: string;
       channel?: string;
       email?: string;
       paused?: boolean;
@@ -580,6 +626,7 @@ function LeadCard({
   ) => void;
   onDelete?: (id: number) => void;
   isAdmin: boolean;
+  adminToken: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [showComment, setShowComment] = useState(false);
@@ -590,6 +637,31 @@ function LeadCard({
   const [editBody, setEditBody] = useState(lead.email_body || "");
   const [editingEmail, setEditingEmail] = useState(false);
   const [emailValue, setEmailValue] = useState(lead.email || "");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<
+    { id: number; field: string; old_value: string; new_value: string; source: string; created_at: string }[]
+  >([]);
+
+  async function toggleHistory() {
+    if (historyOpen) {
+      setHistoryOpen(false);
+      return;
+    }
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(
+        `/api/leads/${lead.id}/history?token=${encodeURIComponent(adminToken ?? "")}`,
+      );
+      const data = await res.json();
+      setHistoryEntries(data.history ?? []);
+    } catch {
+      setHistoryEntries([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   const pendingFields = new Set(
     lead.pending_edit_fields ? lead.pending_edit_fields.split(",") : [],
@@ -735,24 +807,43 @@ function LeadCard({
         {lead.status !== "rejected" && lead.status !== "dnd" && (
           <>
             {showLinkedIn && (
-              <button
-                className="btn sent"
-                onClick={() =>
-                  onMutate(lead.id, {
-                    dm_sent_at: new Date().toISOString(),
-                  })
-                }
-                disabled={
-                  !!lead.dm_sent_at || !!lead.send_paused_at || !lead.linkedin_approved_at
-                }
-                title={
-                  !lead.linkedin_approved_at && !lead.dm_sent_at
-                    ? "Erst 'LinkedIn freigeben' klicken"
-                    : undefined
-                }
-              >
-                {lead.dm_sent_at ? `✓ DM gesendet (${formatDe(lead.dm_sent_at)})` : "DM gesendet"}
-              </button>
+              <>
+                <button
+                  className="btn sent"
+                  onClick={() =>
+                    onMutate(lead.id, {
+                      dm_sent_at: new Date().toISOString(),
+                    })
+                  }
+                  disabled={
+                    !!lead.dm_sent_at ||
+                    !!lead.dm_blocked_at ||
+                    !!lead.send_paused_at ||
+                    !lead.linkedin_approved_at
+                  }
+                  title={
+                    !lead.linkedin_approved_at && !lead.dm_sent_at
+                      ? "Erst 'LinkedIn freigeben' klicken"
+                      : undefined
+                  }
+                >
+                  {lead.dm_sent_at ? `✓ DM gesendet (${formatDe(lead.dm_sent_at)})` : "DM gesendet"}
+                </button>
+                <button
+                  className={lead.dm_blocked_at ? "btn ghost active" : "btn ghost"}
+                  onClick={() =>
+                    onMutate(lead.id, {
+                      dm_blocked_at: lead.dm_blocked_at ? "" : new Date().toISOString(),
+                    })
+                  }
+                  disabled={!!lead.dm_sent_at}
+                  title="DM technisch nicht möglich (nicht verbunden, kein InMail, Profil gesperrt o.ä.) — nicht dasselbe wie Absage/DND"
+                >
+                  {lead.dm_blocked_at
+                    ? `✕ DM nicht möglich (${formatDe(lead.dm_blocked_at)})`
+                    : "DM nicht möglich"}
+                </button>
+              </>
             )}
             {showEmail && (
               <button
@@ -998,6 +1089,32 @@ function LeadCard({
               <p className="research">{lead.research_summary}</p>
             </div>
           )}
+          {isAdmin && (
+            <div className="detail-block">
+              <button type="button" className="btn ghost small" onClick={toggleHistory}>
+                {historyOpen ? "Änderungsverlauf ausblenden ▲" : "Änderungsverlauf anzeigen ▼"}
+              </button>
+              {historyOpen && (
+                <div className="history-list">
+                  {historyLoading ? (
+                    <p className="muted">Lädt…</p>
+                  ) : historyEntries.length === 0 ? (
+                    <p className="muted">Keine Änderungen protokolliert.</p>
+                  ) : (
+                    historyEntries.map((h) => (
+                      <div key={h.id} className="history-entry">
+                        <div className="history-meta">
+                          {formatDe(h.created_at)} · {h.field} · {h.source}
+                        </div>
+                        <p className="history-old">{h.old_value || "(leer)"}</p>
+                        <p className="history-new">{h.new_value || "(leer)"}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <div className="detail-meta">
             {isAdmin ? (
               editingEmail ? (
@@ -1089,6 +1206,7 @@ function ReportTable({ report }: { report: WeekReportRow[] }) {
             <th>Gesendet</th>
             <th>DM</th>
             <th>E-Mail</th>
+            <th>DM n. möglich</th>
             <th>Antworten</th>
             <th>Calls</th>
             <th>Antwortrate</th>
@@ -1109,6 +1227,7 @@ function ReportTable({ report }: { report: WeekReportRow[] }) {
                 <td>{row.sent}</td>
                 <td>{row.dmSent}</td>
                 <td>{row.emailSent}</td>
+                <td>{row.dmBlocked}</td>
                 <td>{row.replied}</td>
                 <td>{row.callsBooked}</td>
                 <td>{rate}%</td>

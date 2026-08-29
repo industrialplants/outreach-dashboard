@@ -49,6 +49,7 @@ function mapLead(r: Row): Lead {
     linkedin_approved_at: String(r.linkedin_approved_at),
     email_approved_at: String(r.email_approved_at),
     dm_sent_at: String(r.dm_sent_at),
+    dm_blocked_at: String(r.dm_blocked_at),
     email_sent_at: String(r.email_sent_at),
     generated_message_original: String(r.generated_message_original),
     email_subject_original: String(r.email_subject_original),
@@ -375,10 +376,31 @@ function isFullySent(
   channel: LeadChannel,
   dmSentAt: string,
   emailSentAt: string,
+  dmBlockedAt: string,
 ): boolean {
-  const linkedinOk = channel === "email" || !!dmSentAt;
+  const linkedinOk = channel === "email" || !!dmSentAt || !!dmBlockedAt;
   const emailOk = channel === "linkedin" || !!emailSentAt;
   return linkedinOk && emailOk;
+}
+
+// Logs a change to one of the three tracked text fields. Called from every
+// path that can change them — dashboard edits, accept/revert, and (as a
+// "Clay tried to overwrite this, here's what it attempted" record) resends
+// that get blocked. Never overwrites or deletes prior entries.
+async function logMessageChange(
+  leadId: number,
+  field: string,
+  oldValue: string,
+  newValue: string,
+  source: string,
+): Promise<void> {
+  if (oldValue === newValue) return;
+  const db = await getDb();
+  await db.execute({
+    sql: `INSERT INTO lead_message_history (lead_id, field, old_value, new_value, source, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)`,
+    args: [leadId, field, oldValue, newValue, source, new Date().toISOString()],
+  });
 }
 
 export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
@@ -389,6 +411,53 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
 
   const db = await getDb();
   const now = new Date().toISOString();
+  const incomingMessage = payload.generated_message ?? "";
+  const incomingSubject = payload.email_subject ?? "";
+  const incomingBody = payload.email_body ?? "";
+
+  // Hard cut (19.08.2026, decided with Daniela): once a lead row exists, a
+  // Clay resend can NEVER change generated_message/email_subject/email_body
+  // again — no conditions, no exceptions. Everything that ever lived in the
+  // dashboard stays exactly as it was; the dashboard is the only place that
+  // can change it from here on. This replaces an earlier, conditional
+  // version of this protection (approved/sent/pending-only) after a lead's
+  // manually-corrected email got overwritten with no visible trace of what
+  // happened — "idR läuft Clay bei uns nie zweimal", so there's no real
+  // workflow this breaks, and it's far simpler to reason about as absolute.
+  const existing = await db.execute({
+    sql: "SELECT id, generated_message, email_subject, email_body FROM leads WHERE client_token = ? AND linkedin_url = ?",
+    args: [token, linkedin],
+  });
+  const existingRow = existing.rows[0];
+  if (existingRow) {
+    const leadId = Number(existingRow.id);
+    // Log what Clay attempted, even though it's being blocked — this is the
+    // audit trail: if this ever needs investigating, "what did Clay try to
+    // send, and when" is answered here, instead of the change happening
+    // invisibly (or, as before, being silently applied).
+    await logMessageChange(
+      leadId,
+      "generated_message",
+      String(existingRow.generated_message),
+      incomingMessage,
+      "webhook_blocked",
+    );
+    await logMessageChange(
+      leadId,
+      "email_subject",
+      String(existingRow.email_subject),
+      incomingSubject,
+      "webhook_blocked",
+    );
+    await logMessageChange(
+      leadId,
+      "email_body",
+      String(existingRow.email_body),
+      incomingBody,
+      "webhook_blocked",
+    );
+  }
+
   await db.execute({
     sql: `INSERT INTO leads (
         client_token, name, company, title, linkedin_url, email,
@@ -401,27 +470,15 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
       )
       ON CONFLICT(client_token, linkedin_url) WHERE linkedin_url <> ''
       DO UPDATE SET
-        generated_message = excluded.generated_message,
-        email_subject     = excluded.email_subject,
-        email_body        = excluded.email_body,
+        -- generated_message, email_subject, email_body, linkedin_approved_at,
+        -- email_approved_at, status, pending_edit_fields, dm_sent_at,
+        -- email_sent_at are deliberately NOT listed here — a resend can
+        -- never touch any of them once the row exists. Only these five
+        -- "metadata" fields still refresh on a resend:
         signal            = excluded.signal,
         research_summary  = excluded.research_summary,
         title             = excluded.title,
         channel           = excluded.channel,
-        -- A resend can overwrite the text — any prior approval was only ever
-        -- for the exact text it was granted on, so it can't carry over.
-        linkedin_approved_at = '',
-        email_approved_at    = '',
-        -- A re-send of an already-reviewed lead flags it as revised so it
-        -- resurfaces for another look; untouched 'new' leads stay 'new'.
-        -- A DND/Absage lead is sticky — never resurfaces, no matter how
-        -- often Clay re-sends the same person (e.g. re-added to a new list
-        -- by mistake). That guarantee is the whole point of the status.
-        status            = CASE
-                                 WHEN leads.status = 'new' THEN 'new'
-                                 WHEN leads.status = 'dnd' THEN 'dnd'
-                                 ELSE 'revised'
-                               END,
         updated_at        = excluded.updated_at`,
     args: {
       client_token: token,
@@ -430,9 +487,9 @@ export async function upsertLead(payload: WebhookPayload): Promise<Lead> {
       title: payload.title ?? "",
       linkedin_url: linkedin,
       email: extractEmail(payload.email),
-      generated_message: payload.generated_message ?? "",
-      email_subject: payload.email_subject ?? "",
-      email_body: payload.email_body ?? "",
+      generated_message: incomingMessage,
+      email_subject: incomingSubject,
+      email_body: incomingBody,
       research_summary: payload.research_summary ?? "",
       signal: payload.signal ?? "",
       channel: normalizeChannel(payload.channel),
@@ -461,6 +518,35 @@ function parsePending(value: string): Set<TrackedField> {
   );
 }
 
+export interface MessageHistoryEntry {
+  id: number;
+  field: string;
+  old_value: string;
+  new_value: string;
+  source: string;
+  created_at: string;
+}
+
+// Full change history for a lead's three tracked text fields, oldest first.
+export async function getLeadHistory(leadId: number): Promise<MessageHistoryEntry[]> {
+  const db = await getDb();
+  const rs = await db.execute({
+    sql: `SELECT id, field, old_value, new_value, source, created_at
+           FROM lead_message_history
+          WHERE lead_id = ?
+          ORDER BY datetime(created_at) ASC`,
+    args: [leadId],
+  });
+  return rs.rows.map((r) => ({
+    id: Number(r.id),
+    field: String(r.field),
+    old_value: String(r.old_value),
+    new_value: String(r.new_value),
+    source: String(r.source),
+    created_at: String(r.created_at),
+  }));
+}
+
 export async function updateLead(
   id: number,
   changes: {
@@ -471,6 +557,7 @@ export async function updateLead(
     email_body?: string;
     dm_sent_at?: string;
     email_sent_at?: string;
+    dm_blocked_at?: string;
     // Whether this update comes from the agency admin or from the client
     // themself — decides whether an edit is tracked as a pending customer
     // change (client) or treated as final/reviewed (admin).
@@ -519,6 +606,8 @@ export async function updateLead(
     changes.email_sent_at !== undefined
       ? changes.email_sent_at
       : existing.email_sent_at;
+  const dm_blocked_at =
+    changes.dm_blocked_at !== undefined ? changes.dm_blocked_at : existing.dm_blocked_at;
 
   const pending = parsePending(existing.pending_edit_fields);
   const accept = new Set(changes.acceptFields ?? []);
@@ -650,7 +739,7 @@ export async function updateLead(
     changes.status === undefined &&
     (changes.dm_sent_at !== undefined || changes.email_sent_at !== undefined) &&
     (existing.status === "approved" || existing.status === "sent") &&
-    isFullySent(channel, dm_sent_at, email_sent_at)
+    isFullySent(channel, dm_sent_at, email_sent_at, dm_blocked_at)
   ) {
     status = "sent";
   }
@@ -666,6 +755,34 @@ export async function updateLead(
   }
 
   const db = await getDb();
+  const changeSource = changes.isAdminEdit ? "admin_edit" : "client_edit";
+  if (linkedinTextChanged) {
+    await logMessageChange(
+      id,
+      "generated_message",
+      existing.generated_message,
+      current.generated_message,
+      revert.has("generated_message") ? "revert" : changeSource,
+    );
+  }
+  if (current.email_subject !== existing.email_subject) {
+    await logMessageChange(
+      id,
+      "email_subject",
+      existing.email_subject,
+      current.email_subject,
+      revert.has("email_subject") ? "revert" : changeSource,
+    );
+  }
+  if (current.email_body !== existing.email_body) {
+    await logMessageChange(
+      id,
+      "email_body",
+      existing.email_body,
+      current.email_body,
+      revert.has("email_body") ? "revert" : changeSource,
+    );
+  }
   await db.execute({
     sql: `UPDATE leads SET
             status = ?, comment = ?, channel = ?, email = ?, send_paused_at = ?,
@@ -673,7 +790,7 @@ export async function updateLead(
             generated_message = ?, email_subject = ?, email_body = ?,
             generated_message_original = ?, email_subject_original = ?, email_body_original = ?,
             pending_edit_fields = ?,
-            dm_sent_at = ?, email_sent_at = ?,
+            dm_sent_at = ?, email_sent_at = ?, dm_blocked_at = ?,
             updated_at = ?
           WHERE id = ?`,
     args: [
@@ -693,6 +810,7 @@ export async function updateLead(
       [...pending].join(","),
       dm_sent_at,
       email_sent_at,
+      dm_blocked_at,
       new Date().toISOString(),
       id,
     ],
@@ -786,6 +904,7 @@ export async function computeKpis(clientToken: string): Promise<Kpis> {
   const pendingApproval = leads.filter(
     (l) => l.status === "new" || l.status === "revised",
   ).length;
+  const dmBlocked = leads.filter((l) => l.dm_blocked_at).length;
 
   return {
     outreachesThisWeek,
@@ -795,6 +914,7 @@ export async function computeKpis(clientToken: string): Promise<Kpis> {
     callsBooked,
     totalLeads: leads.length,
     pendingApproval,
+    dmBlocked,
   };
 }
 
@@ -827,6 +947,7 @@ export async function weeklyReport(
       sent: count("sent") + count("replied") + count("call_booked"),
       dmSent: bucket.rows.filter((l) => l.dm_sent_at).length,
       emailSent: bucket.rows.filter((l) => l.email_sent_at).length,
+      dmBlocked: bucket.rows.filter((l) => l.dm_blocked_at).length,
       replied: count("replied") + count("call_booked"),
       callsBooked: count("call_booked"),
     };

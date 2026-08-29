@@ -56,6 +56,7 @@ async function migrate(db: Client): Promise<void> {
       status            TEXT NOT NULL DEFAULT 'new',
       comment           TEXT NOT NULL DEFAULT '',
       dm_sent_at        TEXT NOT NULL DEFAULT '',
+      dm_blocked_at     TEXT NOT NULL DEFAULT '',
       email_sent_at     TEXT NOT NULL DEFAULT '',
       generated_message_original TEXT NOT NULL DEFAULT '',
       email_subject_original     TEXT NOT NULL DEFAULT '',
@@ -77,6 +78,24 @@ async function migrate(db: Client): Promise<void> {
     -- without a linkedin_url (empty string) don't collide. Backs upsertLead.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_client_linkedin
       ON leads(client_token, linkedin_url) WHERE linkedin_url <> '';
+
+    -- Audit log (19.08.2026): every time generated_message/email_subject/
+    -- email_body actually changes value, for any reason, a row goes here —
+    -- old value, new value, who/what changed it, when. Built after a lead's
+    -- manually-corrected email text got overwritten with no trace of what
+    -- happened or why. Never deleted; this is the recovery mechanism if a
+    -- future bug (ours or Clay's) ever changes text unexpectedly again.
+    CREATE TABLE IF NOT EXISTS lead_message_history (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id    INTEGER NOT NULL,
+      field      TEXT NOT NULL,
+      old_value  TEXT NOT NULL,
+      new_value  TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_lead_message_history_lead_id
+      ON lead_message_history(lead_id);
   `);
 
   // The leads table already exists in production without these two columns.
@@ -97,6 +116,11 @@ async function migrate(db: Client): Promise<void> {
   if (!existing.has("dm_sent_at")) {
     await db.execute(
       "ALTER TABLE leads ADD COLUMN dm_sent_at TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (!existing.has("dm_blocked_at")) {
+    await db.execute(
+      "ALTER TABLE leads ADD COLUMN dm_blocked_at TEXT NOT NULL DEFAULT ''",
     );
   }
   if (!existing.has("email_sent_at")) {
