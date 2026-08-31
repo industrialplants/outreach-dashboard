@@ -771,7 +771,9 @@ export async function updateLead(
   // like "replied" or "call_booked" back to "sent".
   if (
     changes.status === undefined &&
-    (changes.dm_sent_at !== undefined || changes.email_sent_at !== undefined) &&
+    (changes.dm_sent_at !== undefined ||
+      changes.email_sent_at !== undefined ||
+      changes.dm_blocked_at !== undefined) &&
     (existing.status === "approved" || existing.status === "sent") &&
     isFullySent(channel, dm_sent_at, email_sent_at, dm_blocked_at)
   ) {

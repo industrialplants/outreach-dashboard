@@ -609,6 +609,10 @@ code {
   color: var(--muted-2);
   border-left: 2px solid var(--accent);
   padding-left: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 /* ---------- Lead detail ---------- */

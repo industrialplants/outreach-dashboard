@@ -1160,7 +1160,20 @@ function LeadCard({
       )}
 
       {!showComment && lead.comment && (
-        <div className="comment-shown">💬 {lead.comment}</div>
+        <div className="comment-shown">
+          <span>💬 {lead.comment}</span>
+          <button
+            className="btn ghost small"
+            onClick={() => {
+              if (window.confirm("Kommentar als erledigt markieren und löschen?")) {
+                onMutate(lead.id, { comment: "" });
+                setComment("");
+              }
+            }}
+          >
+            ✓ Erledigt
+          </button>
+        </div>
       )}
 
       {open && (
