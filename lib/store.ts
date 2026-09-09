@@ -866,27 +866,6 @@ export async function deleteLead(id: number): Promise<boolean> {
   return res.rowsAffected > 0;
 }
 
-// Delete many leads at once, scoped to a single client so a bad id list can
-// never reach across boards. The caller passes the exact ids it wants gone
-// (the ids currently visible under the active filter), plus the board token
-// those ids must belong to. Any id that doesn't belong to that token is
-// silently skipped rather than deleted — the WHERE clause enforces it in SQL,
-// not just in the caller. Returns how many rows were actually removed.
-export async function deleteLeadsByIds(
-  clientToken: string,
-  ids: number[],
-): Promise<number> {
-  const clean = ids.filter((n) => Number.isInteger(n));
-  if (clean.length === 0) return 0;
-  const db = await getDb();
-  const placeholders = clean.map(() => "?").join(", ");
-  const res = await db.execute({
-    sql: `DELETE FROM leads WHERE client_token = ? AND id IN (${placeholders})`,
-    args: [clientToken, ...clean],
-  });
-  return res.rowsAffected;
-}
-
 // ---------- KPIs & reporting ----------
 
 // Monday 00:00 (local) of the week containing `d`.
