@@ -1608,7 +1608,9 @@ function ClientsPanel({
       const res = await fetch("/api/send-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminToken }),
+        // Scoped to the board currently selected above, so clicking this on
+        // one client never triggers a send for another.
+        body: JSON.stringify({ adminToken, clientToken: selectedClientToken }),
       });
       const data = (await res.json()) as {
         sent?: number;
@@ -1702,12 +1704,12 @@ function ClientsPanel({
   return (
     <section className="clients-panel">
       <div className="clients-list-card send-emails-card">
-        <h2 className="section-title">E-Mail-Versand (Microsoft)</h2>
+        <h2 className="section-title">E-Mail-Versand</h2>
         <p className="muted" style={{ margin: "0 0 12px" }}>
-          Verschickt freigegebene, noch nicht gesendete E-Mails direkt aus dem
-          konfigurierten Postfach. Läuft automatisch alle 15 Minuten — der
-          Button hier ist für den sofortigen Testlauf oder falls mal was
-          Dringendes rausmuss.
+          Verschickt freigegebene, noch nicht gesendete E-Mails für den oben
+          ausgewählten Kunden. Läuft automatisch Montag bis Mittwoch, 7–18 Uhr,
+          eine Mail pro 15-Minuten-Takt. Der Button hier ist für den sofortigen
+          Testlauf oder falls mal was Dringendes rausmuss.
         </p>
         <button className="btn approve" onClick={sendEmailsNow} disabled={sending}>
           {sending ? "Sendet…" : "Jetzt E-Mails senden"}

@@ -2,7 +2,13 @@
 // (client-credentials) OAuth flow — no human login involved. The Azure app
 // registration behind this must have the Mail.Send *application* permission
 // with admin consent, and ideally an Application Access Policy restricting
-// it to exactly the sender mailbox configured below.
+// it to exactly the configured sender mailbox.
+//
+// Credentials are passed in per client (see lib/sendConfig.ts) rather than
+// read from global env vars, so several clients can each send from their own
+// tenant and mailbox.
+
+import type { MicrosoftSendConfig } from "./sendConfig";
 
 interface GraphTokenResponse {
   access_token?: string;
@@ -10,24 +16,15 @@ interface GraphTokenResponse {
   error_description?: string;
 }
 
-async function getGraphAccessToken(): Promise<string> {
-  const tenantId = process.env.MS_TENANT_ID;
-  const clientId = process.env.MS_CLIENT_ID;
-  const clientSecret = process.env.MS_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error(
-      "MS_TENANT_ID, MS_CLIENT_ID und MS_CLIENT_SECRET müssen als Environment Variables gesetzt sein.",
-    );
-  }
-
+async function getGraphAccessToken(config: MicrosoftSendConfig): Promise<string> {
   const res = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`,
     {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
         scope: "https://graph.microsoft.com/.default",
         grant_type: "client_credentials",
       }),
@@ -43,20 +40,14 @@ async function getGraphAccessToken(): Promise<string> {
   return data.access_token;
 }
 
-export async function sendMailViaGraph(params: {
-  to: string;
-  subject: string;
-  body: string;
-}): Promise<void> {
-  const sender = process.env.MS_SENDER_EMAIL;
-  if (!sender) {
-    throw new Error("MS_SENDER_EMAIL muss als Environment Variable gesetzt sein.");
-  }
-
-  const accessToken = await getGraphAccessToken();
+export async function sendMailViaGraph(
+  config: MicrosoftSendConfig,
+  params: { to: string; subject: string; body: string },
+): Promise<void> {
+  const accessToken = await getGraphAccessToken(config);
 
   const res = await fetch(
-    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(config.sender)}/sendMail`,
     {
       method: "POST",
       headers: {
