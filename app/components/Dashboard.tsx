@@ -232,6 +232,41 @@ export default function Dashboard({
     startTransition(() => router.refresh());
   }
 
+  // One-time cleanup helper: deletes exactly the leads currently visible under
+  // the active filter. Admin-only, scoped server-side to the selected board.
+  // Two confirmations on purpose — this is irreversible beyond Turso's recovery
+  // window, so it should never happen on a single stray click.
+  async function bulkDeleteLeads(ids: number[]) {
+    if (role !== "admin" || !selected || ids.length === 0) return;
+    const first = window.confirm(
+      `Wirklich ${ids.length} Leads im Board „${selected.name ?? selected.token}“ löschen? Das kann nicht rückgängig gemacht werden.`,
+    );
+    if (!first) return;
+    const second = window.prompt(
+      `Zum Bestätigen die Anzahl eintippen: ${ids.length}`,
+    );
+    if (second === null || second.trim() !== String(ids.length)) {
+      alert("Abgebrochen — Anzahl stimmte nicht überein. Es wurde nichts gelöscht.");
+      return;
+    }
+    const res = await fetch("/api/leads/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: adminToken,
+        clientToken: selected.token,
+        ids,
+      }),
+    });
+    if (!res.ok) {
+      alert("Massenlöschen fehlgeschlagen. Bitte erneut versuchen.");
+      return;
+    }
+    const data = (await res.json()) as { deleted?: number };
+    alert(`${data.deleted ?? 0} Leads gelöscht.`);
+    startTransition(() => router.refresh());
+  }
+
   const noBoard = role === "admin" && !selected;
 
   return (
@@ -467,6 +502,13 @@ export default function Dashboard({
                       }}
                     >
                       {listOpen ? "Liste ausblenden ▲" : `📋 Liste anzeigen (${filteredLeads.length})`}
+                    </button>
+                    <button
+                      className="btn danger small"
+                      onClick={() => bulkDeleteLeads(filteredLeads.map((l) => l.id))}
+                      disabled={filteredLeads.length === 0}
+                    >
+                      🗑 Alle {filteredLeads.length} löschen
                     </button>
                     {listOpen && (
                       <div className="list-export-body">
